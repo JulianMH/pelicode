@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build and test artifacts
+dist/
+out/
+.vscode-test/
+coverage/
+
+# Packaged extensions
+*.vsix
+
+# Local environment and operating system files
+.env
+.env.*
+.DS_Store
+
+.pelicode
