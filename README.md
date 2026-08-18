@@ -1,24 +1,45 @@
 # PeliCode
 
-PeliCode adds a dedicated chat view to the VS Code Activity Bar. Select the chat icon on the left side of the editor to open it.
+PeliCode is a very basic chat-agent harness for VS Code for educational purposes 
+and my own usage on personal projects. It is focussed on making clear what 
+exactly the agent is prompted rather than hiding it. It allows viewing and editing files, 
+but not much else. The harness works very well with small
+LLM models since it does not overload the context with long system prompts and many tools.
+
+PeliCode is still under active development and is intended for experimentation rather
+than production use. Most of its development has been dogfooded: PeliCode has
+been used to develop PeliCode itself.
 
 ## Features
 
-- A chat view in the VS Code Activity Bar.
-- Local message history for the open chat session.
-- The `PeliCode: Focus PeliCode Chat` command to focus the view.
-- OpenRouter-powered responses with selectable models.
-- Tool calls for workspace file operations, including listing, reading, writing,
-  and applying patches.
-- Optional reasoning output and tool-call results displayed in the chat.
+- Multiple local chat tabs with persisted history in the projects.
+- Selectable OpenRouter models and displayed request costs.
+- Workspace tools for listing, reading, writing, patching, moving, and removing
+  files.
+- Visible tool results and optional model reasoning in the chat.
 
-PeliCode sends chat requests to OpenRouter and can use tool calls to inspect and
-modify files in the workspace. Generated responses require an OpenRouter API
-key; see the [OpenRouter](#openrouter) section below.
+Tool calls can modify files without a confirmation step. Only use PeliCode in a
+workspace you trust, and review its changes as you would changes from any other
+coding agent.
+
+## Features still under development
+
+- [ ] Keep PeliCode file access strictly inside trusted workspace folders.
+- [ ] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
+- [ ] Extend PeliCode to accept remote control from other devices via WebSockets.
+- [ ] Support selecting files across multi-root workspaces.
+- [ ] Give each chat its own Git branch workspace.
+- [ ] Compare several models and rank their answers by quality, time, and cost.
+- [ ] Add an adversarial mode with an implementer and reviewer agent.
+- [ ] Let users choose tool permission presets, including read-only access.
+- [ ] Add an evaluation tool for checking agent work.
+- [ ] Add focused Git tools for common repository tasks.
 
 ## OpenRouter
 
-The chat uses OpenRouter's `openai/gpt-5.6-luna` model. Set `OPENROUTER_API_KEY` in the environment that launches VS Code. When VS Code is started from the macOS Dock or Finder, it does not automatically inherit values from `.zshrc`; start it with `code .` from a terminal where the variable is set, or configure the variable in the app launch environment.
+PeliCode requires an `OPENROUTER_API_KEY` in the environment that launches VS
+Code. The default model is `openai/gpt-5.6-luna`, and other supported models can
+be selected in the chat UI.
 
 ## Install locally
 
@@ -31,6 +52,9 @@ code --install-extension pelicode-0.0.1.vsix
 
 Reload the VS Code window after installation.
 
+
 ## Development
 
-Run `F5` in VS Code to open an Extension Development Host. The watch build is started automatically.
+During development, the
+`Install Chatbot and Reload` status-bar action rebuilds, installs, and reloads
+the current VSIX when PeliCode is already installed.
