@@ -50,7 +50,7 @@
 <svelte:head><title>Code AI Chat</title></svelte:head>
 
 <main aria-live="polite">
-	<nav class="tabs" aria-label="Chat views" role="tablist">
+	<div class="tabs" aria-label="Chat views" role="tablist">
 		{#each tabs as tab (tab.id)}
 			<div class:active={activeTab === tab.id} class="tab-item">
 				<button
@@ -86,7 +86,7 @@
 				+
 			{/if}
 		</button>
-	</nav>
+	</div>
 
 	<div class="chat-panel" role="tabpanel">
 		{#if tabs.length === 0}

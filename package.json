@@ -4,6 +4,10 @@
   "description": "An Activity Bar chat assistant for VS Code",
   "version": "0.0.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JulianMH/pelicode.git"
+  },
   "engines": {
     "vscode": "^1.125.0"
   },
