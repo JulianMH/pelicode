@@ -1,5 +1,9 @@
 # PeliCode
 
+<p align="center">
+  <img src="media/pelican.svg" alt="PeliCode pelican icon" width="128">
+</p>
+
 PeliCode is a very basic chat-agent harness for VS Code for educational purposes 
 and my own usage on personal projects. It is focussed on making clear what 
 exactly the agent is prompted rather than hiding it. It allows viewing and editing files, 
@@ -21,6 +25,12 @@ been used to develop PeliCode itself.
 Tool calls can modify files without a confirmation step. Only use PeliCode in a
 workspace you trust, and review its changes as you would changes from any other
 coding agent.
+
+## Screenshot
+
+<p align="center">
+  <img src="screenshot.png" alt="PeliCode screenshot">
+</p>
 
 ## Features still under development
 
