@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { Command } from './command';
-import { formatError, getRequiredWorkspaceTarget } from './workspace';
+import { formatError, getRequiredWorkspaceTarget, isProtectedWorkspacePath } from './workspace';
 
 export const removeCommand: Command = {
 	apiTool: {
@@ -14,7 +14,8 @@ export const removeCommand: Command = {
 				properties: {
 					path: {
 						type: 'string',
-						description: 'Workspace-relative file or folder path to remove.',
+						description:
+							'Workspace-relative file or folder path to remove. In a multi-root workspace, prefix it with the workspace folder name.',
 					},
 				},
 				required: ['path'],
@@ -26,12 +27,7 @@ export const removeCommand: Command = {
 	async execute({ path }) {
 		const target = await getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
-		const normalizedPath = path
-			.replace(/\\/g, '/')
-			.split('/')
-			.filter((part) => part && part !== '.')
-			.join('/');
-		if (!normalizedPath || normalizedPath === '.pelicode' || normalizedPath === '.git') {
+		if (isProtectedWorkspacePath(target)) {
 			return 'Error: The workspace root, .pelicode, and .git folders cannot be removed.';
 		}
 		try {

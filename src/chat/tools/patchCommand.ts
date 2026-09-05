@@ -16,7 +16,11 @@ export const patchCommand: Command = {
 			parameters: {
 				type: 'object',
 				properties: {
-					path: { type: 'string', description: 'Workspace-relative file path.' },
+					path: {
+						type: 'string',
+						description:
+							'Workspace-relative file path. In a multi-root workspace, prefix it with the workspace folder name.',
+					},
 					patch: {
 						type: 'string',
 						description: 'Unified diff containing the partial file update.',

@@ -11,7 +11,13 @@ export const readCommand: Command = {
 			description: 'Read the contents of a file in the workspace.',
 			parameters: {
 				type: 'object',
-				properties: { path: { type: 'string', description: 'Workspace-relative file path.' } },
+				properties: {
+					path: {
+						type: 'string',
+						description:
+							'Workspace-relative file path. In a multi-root workspace, prefix it with the workspace folder name.',
+					},
+				},
 				required: ['path'],
 				additionalProperties: false,
 			},

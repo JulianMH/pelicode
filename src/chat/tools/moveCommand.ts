@@ -7,14 +7,20 @@ export const moveCommand: Command = {
 		type: 'function',
 		function: {
 			name: 'mv',
-			description: 'Move a workspace file or folder to another workspace path.',
+			description:
+				'Move a workspace file or folder to another workspace path. In a multi-root workspace, prefix both paths with the workspace folder name.',
 			parameters: {
 				type: 'object',
 				properties: {
-					path: { type: 'string', description: 'Workspace-relative source file or folder path.' },
+					path: {
+						type: 'string',
+						description:
+							'Workspace-relative source file or folder path. In a multi-root workspace, prefix it with the workspace folder name.',
+					},
 					destination: {
 						type: 'string',
-						description: 'Workspace-relative destination file or folder path.',
+						description:
+							'Workspace-relative destination file or folder path. In a multi-root workspace, prefix it with the workspace folder name.',
 					},
 				},
 				required: ['path', 'destination'],

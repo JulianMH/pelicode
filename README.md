@@ -37,7 +37,7 @@ coding agent.
 - [x] Keep PeliCode file access strictly inside trusted workspace folders.
 - [ ] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
 - [x] Extend PeliCode to accept remote control from other devices via WebSockets.
-- [ ] Support selecting files across multi-root workspaces.
+- [x] Support selecting files across multi-root workspaces.
 - [ ] Give each chat its own Git branch workspace.
 - [ ] Compare several models and rank their answers by quality, time, and cost.
 - [ ] Add an adversarial mode with an implementer and reviewer agent.
