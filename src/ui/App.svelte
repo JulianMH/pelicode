@@ -2,19 +2,26 @@
 	import { onMount } from 'svelte';
 	import ChatView from './ChatView.svelte';
 	import type { ChatViewClient } from './chatViewClient';
-	import type { ChatSummary } from '../chat/protocol';
+	import type { ChatSummary, RemoteControlState } from '../chat/protocol';
 	import PelicanIcon from './PelicanIcon.svelte';
+	import RemoteControlToggle from './RemoteControlToggle.svelte';
 
 	export let createClient: (id: string) => ChatViewClient;
 	export let connected = true;
+	export let showRemoteControl = false;
 
 	type ChatTab = ChatSummary & { client: ChatViewClient };
 	const client = createClient('default');
 	let tabs: ChatTab[] = [];
 	let activeTab = '';
+	let remoteControl: RemoteControlState = { enabled: false, busy: true };
 
 	onMount(() => {
 		const unsubscribe = client.onMessage((message) => {
+			if (message.type === 'remoteControlUpdated') {
+				remoteControl = message.state;
+				return;
+			}
 			if (message.type !== 'chatsUpdated') return;
 			const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.id === activeTab));
 			tabs = message.chats.map((chat) => ({
@@ -29,9 +36,17 @@
 		return unsubscribe;
 	});
 
+	function toggleRemoteControl(): void {
+		if (remoteControl.busy) return;
+		remoteControl = { ...remoteControl, busy: true };
+		client.setRemoteControl(!remoteControl.enabled);
+	}
+
 	function addTab(): void {
 		if (!connected) return;
-		activeTab = crypto.randomUUID();
+		activeTab = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+			byte.toString(16).padStart(2, '0'),
+		).join('');
 		createClient(activeTab).create();
 	}
 	function closeTab(id: string): void {
@@ -42,43 +57,49 @@
 <svelte:head><title>Code AI Chat</title></svelte:head>
 
 <main aria-live="polite">
-	<div class="tabs" aria-label="Chat views" role="tablist">
-		{#each tabs as tab (tab.id)}
-			<div class:active={activeTab === tab.id} class="tab-item">
-				<button
-					type="button"
-					role="tab"
-					aria-selected={activeTab === tab.id}
-					class="tab-button"
-					onclick={() => activeTab = tab.id}
-				>
-					{tab.label}
-					{#if tab.unread}<span class="unread-dot" aria-label="Unread response" title="Unread response"></span>{/if}
-					{#if tab.thinking}
-						<span class="thinking-dot" aria-label="PeliCode is thinking" title="PeliCode is thinking">
-							<svg viewBox="0 0 16 16" aria-hidden="true">
-								<path d="M3 3h10M3 13h10M4 4l4 4 4-4M4 12l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-							</svg>
-						</span>
-					{/if}
-				</button>
-				<button type="button" class="close-tab" disabled={!connected} title="Close {tab.label}" aria-label="Close {tab.label}" onclick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</button>
-			</div>
-		{/each}
-		<button
-			type="button"
-			class="add-tab"
-			title="New Chat"
-			aria-label="New Chat"
-			onclick={addTab}
-			disabled={!connected}
-		>
-			{#if tabs.length === 0}
-				New Chat +
-			{:else}
-				+
-			{/if}
-		</button>
+	<div class="tab-bar">
+		<div class="tabs" aria-label="Chat views" role="tablist">
+			{#each tabs as tab (tab.id)}
+				<div class:active={activeTab === tab.id} class="tab-item">
+					<button
+						type="button"
+						role="tab"
+						aria-selected={activeTab === tab.id}
+						class="tab-button"
+						onclick={() => activeTab = tab.id}
+					>
+						{tab.label}
+						{#if tab.unread}<span class="unread-dot" aria-label="Unread response" title="Unread response"></span>{/if}
+						{#if tab.thinking}
+							<span class="thinking-dot" aria-label="PeliCode is thinking" title="PeliCode is thinking">
+								<svg viewBox="0 0 16 16" aria-hidden="true">
+									<path d="M3 3h10M3 13h10M4 4l4 4 4-4M4 12l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+								</svg>
+							</span>
+						{/if}
+					</button>
+					<button type="button" class="close-tab" disabled={!connected} title="Close {tab.label}" aria-label="Close {tab.label}" onclick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</button>
+				</div>
+			{/each}
+			<button
+				type="button"
+				class="add-tab"
+				title="New Chat"
+				aria-label="New Chat"
+				onclick={addTab}
+				disabled={!connected}
+			>
+				{#if tabs.length === 0}
+					New Chat +
+				{:else}
+					+
+				{/if}
+			</button>
+		</div>
+
+		{#if showRemoteControl}
+			<RemoteControlToggle state={remoteControl} onToggle={toggleRemoteControl} />
+		{/if}
 	</div>
 
 	<div class="chat-panel" role="tabpanel">
@@ -106,10 +127,12 @@
 	}
 
 	main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+	.tab-bar { display: flex; align-items: center; flex-shrink: 0; background: var(--vscode-editorGroupHeader-tabsBackground); border-bottom: 1px solid var(--vscode-panel-border); }
 	.tabs {
+		flex: 1;
+		min-width: 0;
 		overflow-x: auto;
 		background: var(--vscode-editorGroupHeader-tabsBackground);
-		border-bottom: 1px solid var(--vscode-panel-border);
 		display: flex;
 		flex-shrink: 0;
 		padding: 0 8px;

@@ -13,8 +13,6 @@
 	export let active = false;
 	export let host: ChatViewClient;
 	export let connected = true;
-	export let onThinking: (thinking: boolean) => void = () => {};
-	export let onUnread: (unread: boolean) => void = () => {};
 
 	const markdown = new MarkdownIt({ breaks: true, linkify: true, typographer: true });
 
@@ -39,12 +37,6 @@
 		return unsubscribe;
 	});
 
-	function setThinking(thinking: boolean): void {
-		if (isWaiting === thinking) return;
-		isWaiting = thinking;
-		onThinking(thinking);
-	}
-
 	$: if (active) host.viewOpened();
 	$: if (!active) host.viewClosed();
 	$: if (active) void scrollToBottom();
@@ -56,13 +48,13 @@
 	function send(): void {
 		const text = prompt.trim();
 		if (!text || !connected || isWaiting) return;
-		setThinking(true);
+		isWaiting = true;
 		sentPrompt = text;
 		host.send(text, model);
 		void scrollToBottom();
 	}
 	function cancel(): void {
-		setThinking(false);
+		isWaiting = false;
 		host.cancel();
 	}
 	function selectModel(value: OpenRouterModel): void {
@@ -91,39 +83,31 @@
 				messages = data.messages.filter((entry) =>
 					entry.type !== 'assistantMessage' || entry.text.trim().length > 0,
 				);
-				void scrollToBottom();
 				model = data.model ?? defaultModel;
 				break;
 			case 'costUpdated':
 				totalCost = data.cost;
-				void scrollToBottom();
-				break;
-			case 'unreadUpdated':
-				onUnread(data.unread);
 				break;
 			case 'requestStarted':
-				setThinking(true);
-				void scrollToBottom();
+				isWaiting = true;
 				break;
 			case 'entry':
-				handleEntry(data.entry, data.final);
+				handleEntry(data.entry);
 				break;
 			case 'requestFinished':
 				sentPrompt = undefined;
-				setThinking(false);
-				void scrollToBottom();
+				isWaiting = false;
 				break;
 		}
+		void scrollToBottom();
 	}
-	function handleEntry(entry: ChatEntry, final?: boolean): void {
+	function handleEntry(entry: ChatEntry): void {
 		messages = [...messages, entry];
 		if (entry.type === 'userMessage' && entry.text === sentPrompt) {
 			prompt = '';
 			sentPrompt = undefined;
 		}
 		if (entry.type === 'modelSwitch' && isOpenRouterModel(entry.text)) model = entry.text;
-		void scrollToBottom();
-		if (entry.type === 'assistantMessage') setThinking(final === false);
 	}
 </script>
 

@@ -1,11 +1,21 @@
 import type { ChatEntry } from './chatEntry';
 import type { OpenRouterModel } from './models';
-import type { ChatSummary, Dispose, HostToWebviewMessage, WebviewToHostMessage } from './protocol';
+import type {
+	ChatSummary,
+	Dispose,
+	HostToWebviewMessage,
+	RemoteControlState,
+	WebviewToHostMessage,
+} from './protocol';
 
 export abstract class ChatViewHost {
 	protected abstract post(message: HostToWebviewMessage): void;
 
 	abstract onMessage(listener: (message: WebviewToHostMessage) => void): Dispose;
+
+	remoteControlUpdated(state: RemoteControlState): void {
+		this.post({ type: 'remoteControlUpdated', id: '', state });
+	}
 
 	chatsUpdated(chats: ChatSummary[]): void {
 		this.post({ type: 'chatsUpdated', id: '', chats });
@@ -19,12 +29,8 @@ export abstract class ChatViewHost {
 		this.post({ type: 'costUpdated', id, cost });
 	}
 
-	unreadUpdated(id: string, unread: boolean): void {
-		this.post({ type: 'unreadUpdated', id, unread });
-	}
-
-	entry(id: string, entry: ChatEntry, final?: boolean): void {
-		this.post({ type: 'entry', id, entry, final });
+	entry(id: string, entry: ChatEntry): void {
+		this.post({ type: 'entry', id, entry });
 	}
 
 	requestStarted(id: string): void {

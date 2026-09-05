@@ -6,6 +6,7 @@ import type { ChatViewHost } from './chatViewHost';
 import {
 	isWebviewToHostMessage,
 	type ChatSummary,
+	type RemoteControlState,
 	type Dispose,
 	type WebviewToHostMessage,
 } from './protocol';
@@ -28,7 +29,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private view?: vscode.WebviewView;
 	private readonly hosts = new Map<ChatViewHost, Dispose>();
 	private readonly openChats = new Map<ChatViewHost, string>();
-	public constructor(private readonly extensionUri: vscode.Uri) {
+	private remoteControl: RemoteControlState = { enabled: false, busy: false };
+	public constructor(
+		private readonly extensionUri: vscode.Uri,
+		private readonly setRemoteControl: (enabled: boolean) => Promise<void>,
+	) {
 		const workspace = vscode.workspace.workspaceFolders?.[0];
 		this.chatDirectory = workspace
 			? vscode.Uri.joinPath(workspace.uri, '.pelicode', 'chat')
@@ -41,7 +46,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		await this.modelsLoaded;
 		this.view = view;
 		const disconnect = this.connectHost(new VscodeChatViewHost(view.webview));
-		this.updateBadge();
+		this.updateChats();
 		view.onDidDispose(() => {
 			if (this.view === view) this.view = undefined;
 			disconnect();
@@ -66,6 +71,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			this.openChats.delete(host);
 		};
 	}
+	public updateRemoteControl(state: RemoteControlState): void {
+		this.remoteControl = state;
+		for (const host of this.hosts.keys()) {
+			if (host instanceof VscodeChatViewHost) host.remoteControlUpdated(state);
+		}
+	}
 	public dispose(): void {
 		for (const unsubscribe of this.hosts.values()) unsubscribe();
 		this.hosts.clear();
@@ -76,7 +87,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		for (const host of this.hosts.keys()) send(host);
 	}
 	private handleMessage(host: ChatViewHost, message: WebviewToHostMessage): void {
+		if (message.type === 'setRemoteControl') {
+			if (host instanceof VscodeChatViewHost) void this.setRemoteControl(message.enabled);
+			return;
+		}
 		if (message.type === 'listChats') {
+			if (host instanceof VscodeChatViewHost) host.remoteControlUpdated(this.remoteControl);
 			host.chatsUpdated(this.getChatSummaries());
 			return;
 		}
@@ -86,7 +102,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		switch (message.type) {
 			case 'create':
 				this.persist(chatModel);
-				this.updateBadge();
+				this.updateChats();
 				return;
 			case 'close':
 				chatModel.activeRequest?.abort();
@@ -95,25 +111,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					if (id === chatModel.id) this.openChats.delete(peer);
 				}
 				this.chatModels.delete(chatModel.id);
-				this.broadcast((peer) => {
-					peer.restore(chatModel.id, []);
-					peer.costUpdated(chatModel.id, 0);
-					peer.unreadUpdated(chatModel.id, false);
-					peer.requestFinished(chatModel.id);
-				});
+
 				void this.removeChatModel(chatModel.id);
-				this.updateBadge();
+				this.updateChats();
 				return;
 			case 'cancel':
 				chatModel.activeRequest?.abort();
 				chatModel.activeRequest = undefined;
-				this.updateBadge();
+				this.updateChats();
 				this.broadcast((host) => host.requestFinished(chatModel.id));
 				return;
 			case 'ready':
 				host.restore(chatModel.id, chatModel.messages, chatModel.activeModel);
 				host.costUpdated(chatModel.id, chatModel.totalCost);
-				host.unreadUpdated(chatModel.id, chatModel.isUnread);
 				if (chatModel.activeRequest) host.requestStarted(chatModel.id);
 				else host.requestFinished(chatModel.id);
 				return;
@@ -121,8 +131,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this.openChats.set(host, chatModel.id);
 				chatModel.isUnread = false;
 				this.persist(chatModel);
-				this.updateBadge();
-				this.broadcast((host) => host.unreadUpdated(chatModel.id, false));
+				this.updateChats();
 				return;
 			case 'viewClosed':
 				if (this.openChats.get(host) === chatModel.id) this.openChats.delete(host);
@@ -134,11 +143,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this.recordModelSwitch(chatModel, model);
 				const controller = new AbortController();
 				chatModel.activeRequest = controller;
-				this.updateBadge();
+				this.updateChats();
 				void this.reply(chatModel, text, model, controller.signal).finally(() => {
 					if (chatModel.activeRequest === controller) {
 						chatModel.activeRequest = undefined;
-						this.updateBadge();
+						this.broadcast((host) => host.requestFinished(chatModel.id));
+						this.updateChats();
 					}
 				});
 				return;
@@ -228,10 +238,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					useTrash: false,
 				}),
 			);
-		this.writeQueues.set(
-			id,
-			removal.then(() => undefined),
-		);
+		this.writeQueues.set(id, removal);
 		await removal.catch(() => undefined);
 	}
 	private getChatSummaries(): ChatSummary[] {
@@ -242,13 +249,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			unread: model.isUnread,
 		}));
 	}
-	private updateBadge(): void {
+	private updateChats(): void {
 		const chats = this.getChatSummaries();
 		this.broadcast((host) => host.chatsUpdated(chats));
 		if (!this.view) return;
-		const count = [...this.chatModels.values()].filter(
-			(chatModel) => chatModel.isUnread || chatModel.activeRequest !== undefined,
-		).length;
+		const count = chats.filter((chat) => chat.unread || chat.thinking).length;
 		this.view.badge = {
 			value: count,
 			tooltip: count === 1 ? '1 unread or loading chat' : `${count} unread or loading chats`,
@@ -260,79 +265,69 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		model: OpenRouterModel,
 		signal: AbortSignal,
 	): Promise<void> {
-		if (prompt)
-			this.appendEntry(chatModel, {
-				type: 'userMessage',
-				text: prompt,
-				rawOpenRouterPayload: { role: 'user', content: prompt },
-			});
+		this.appendEntry(chatModel, {
+			type: 'userMessage',
+			text: prompt,
+			rawOpenRouterPayload: { role: 'user', content: prompt },
+		});
 		try {
 			this.broadcast((host) => host.requestStarted(chatModel.id));
-			const response = await requestOpenRouter(
-				toApiMessages(chatModel.messages, model),
-				model,
-				0,
-				0,
-				signal,
-			);
-			if (signal.aborted) return;
-			chatModel.totalCost += response.cost;
-			this.persist(chatModel);
-			this.broadcast((host) => host.costUpdated(chatModel.id, chatModel.totalCost));
-			const reasoning = extractReasoning(response.reasoningDetails);
-			if (reasoning) {
-				const entry: ChatEntry = { type: 'reasoning', text: reasoning };
-				this.appendEntry(chatModel, entry);
-			}
-			const content = response.content?.trim() ?? '';
-			if (content || response.toolCalls?.length) {
-				const rawOpenRouterPayload: OpenRouterMessage = {
-					role: 'assistant',
-					content: response.content ?? null,
-					...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
-					...(response.toolCalls?.length
-						? { tool_calls: response.toolCalls.map(toOpenRouterToolCall) }
-						: {}),
-				};
-				const entry: ChatEntry = { type: 'assistantMessage', text: content, rawOpenRouterPayload };
-				chatModel.messages.push(entry);
+			while (!signal.aborted) {
+				const response = await requestOpenRouter(
+					toApiMessages(chatModel.messages, model),
+					model,
+					0,
+					0,
+					signal,
+				);
+				if (signal.aborted) return;
+				chatModel.totalCost += response.cost;
 				this.persist(chatModel);
-				if (content)
-					this.broadcast((host) => host.entry(chatModel.id, entry, !response.toolCalls?.length));
-			}
-			if (response.toolCalls?.length) {
+				this.broadcast((host) => host.costUpdated(chatModel.id, chatModel.totalCost));
+				const reasoning = extractReasoning(response.reasoningDetails);
+				if (reasoning) this.appendEntry(chatModel, { type: 'reasoning', text: reasoning });
+				const content = response.content?.trim() ?? '';
+				if (content || response.toolCalls?.length) {
+					const rawOpenRouterPayload: OpenRouterMessage = {
+						role: 'assistant',
+						content: response.content ?? null,
+						...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
+						...(response.toolCalls?.length
+							? { tool_calls: response.toolCalls.map(toOpenRouterToolCall) }
+							: {}),
+					};
+					const entry: ChatEntry = {
+						type: 'assistantMessage',
+						text: content,
+						rawOpenRouterPayload,
+					};
+					chatModel.messages.push(entry);
+					this.persist(chatModel);
+					if (content) this.broadcast((host) => host.entry(chatModel.id, entry));
+				}
+				if (!response.toolCalls?.length) break;
 				for (const toolCall of response.toolCalls) {
 					await this.runTool(chatModel, toolCall, signal);
 					if (signal.aborted) return;
 				}
-				await this.reply(chatModel, '', model, signal);
-				return;
 			}
-			this.broadcast((host) => host.requestFinished(chatModel.id));
-			this.markUnread(chatModel);
 		} catch (error) {
 			if (signal.aborted) return;
-			const entry: ChatEntry = {
+			this.appendEntry(chatModel, {
 				type: 'assistantMessage',
 				text: error instanceof Error ? error.message : 'OpenRouter request failed.',
-			};
-			this.appendEntry(chatModel, entry, true);
-			this.broadcast((host) => host.requestFinished(chatModel.id));
-			this.markUnread(chatModel);
-		} finally {
-			this.updateBadge();
+			});
+		}
+		if (!signal.aborted) {
+			chatModel.isUnread = ![...this.openChats.values()].includes(chatModel.id);
+			this.persist(chatModel);
 		}
 	}
-	private appendEntry(chatModel: ChatModel, entry: ChatEntry, final?: boolean): void {
+
+	private appendEntry(chatModel: ChatModel, entry: ChatEntry): void {
 		chatModel.messages.push(entry);
 		this.persist(chatModel);
-		this.broadcast((host) => host.entry(chatModel.id, entry, final));
-	}
-	private markUnread(chatModel: ChatModel): void {
-		chatModel.isUnread = ![...this.openChats.values()].includes(chatModel.id);
-		this.persist(chatModel);
-		this.updateBadge();
-		this.broadcast((host) => host.unreadUpdated(chatModel.id, chatModel.isUnread));
+		this.broadcast((host) => host.entry(chatModel.id, entry));
 	}
 	private async runTool(
 		chatModel: ChatModel,

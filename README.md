@@ -80,25 +80,37 @@ and result formatting live beside the registry in `src/chat/tools/index.ts`.
 
 ## Browser chat and HTML export
 
-PeliCode starts its browser server automatically when the extension activates.
-Each VS Code window takes a free localhost port in the range **43120–43139**.
-The HTML page discovers these instances and lists their workspace names and paths.
-Select an instance to open the same chat UI and tabs as in the VS Code sidebar.
-New and closed tabs, messages, costs, and request state are synchronized.
+The small **Remote control** toggle beside the chat tabs in the VS Code extension
+starts and stops its HTML and WebSocket server. Remote control starts disabled
+every time the extension loads; its enabled state is not saved. Enabling it copies the complete instance URL,
+including `#key=…`, to the clipboard. Open this URL to connect directly to that
+VS Code instance and use the same chat UI and tabs as in the sidebar.
+The toggle also shows a QR code for this URL for ten seconds after enabling
+remote control, and while hovering over or keyboard-focusing the enabled toggle.
 
-Run **PeliCode: Open Browser Chat** from the Command Palette to open the instance
-picker, or use `npm run dev` and open `http://127.0.0.1:5173/chat.html`.
-The picker refreshes every five seconds and also has a manual refresh button.
-Use **Instances** to switch workspaces and **Reconnect** after a dropped connection.
-The extension sidebar can remain closed.
+Each running extension instance has one random key shared by all its chat tabs
+and browser connections. The key stays the same when toggling remote control
+within that instance and changes when the extension reloads. The server chooses
+an available port on the first non-loopback IPv4 address each time it starts,
+so use the latest copied URL or QR code.
+WebSocket connections require the instance key. Disabling remote control closes
+all browser connections and stops the server. Startup does not modify the clipboard.
+
+**PeliCode: Open Browser Chat** enables remote control, copies its URL, and opens
+the page. There is no instance discovery, connection form, or port scanning.
+The page connects using the instance URL in the browser address bar. Use
+**Reconnect** after a dropped connection, or open another copied URL to switch
+instances. The extension sidebar can remain closed.
 
 `npm run compile` and `npm run package` build the extension and standalone
 `dist/chat.html`. `npm run export:html` exports just the HTML, including its
-JavaScript and styles. `npm run dev` serves the frontend and rebuilds it on
-changes; reload the page to see them. The backend runs in VS Code, so install
-or rebuild the updated extension and reload its window for backend changes.
+JavaScript and styles. `npm run dev` serves it at
+`http://127.0.0.1:5173/chat.html` and rebuilds on changes; reload the page to see
+them. For a live backend connection, open the instance URL copied by the extension.
+The backend runs in VS Code, so install or rebuild the updated extension
+and reload its window for backend changes.
 
-The current mode is **YOLO**: no authentication, tokens, or origin restrictions.
-Servers bind to `127.0.0.1`; discovery supports up to 20 simultaneous instances on
-the same machine. Connecting from a smartphone to another machine is not included
-in this version. The OpenRouter API key remains in the extension host.
+The server binds to the selected network IP. Open the copied URL or scan the
+QR code from a smartphone on the same local network. After changing networks,
+turn remote control off and on again to refresh the address. Enabling remote
+control requires a network IPv4 address. The OpenRouter API key remains in the extension host.

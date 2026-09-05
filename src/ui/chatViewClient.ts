@@ -8,6 +8,10 @@ export abstract class ChatViewClient {
 
 	abstract onMessage(listener: (message: HostToWebviewMessage) => void): Dispose;
 
+	setRemoteControl(enabled: boolean): void {
+		this.post({ type: 'setRemoteControl', id: this.chatId, enabled });
+	}
+
 	listChats(): void {
 		this.post({ type: 'listChats', id: this.chatId });
 	}

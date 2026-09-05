@@ -1,109 +1,81 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { browserChatPorts, type BrowserChatInstance } from '../chat/browserDiscovery';
 	import App from './App.svelte';
 	import { SocketChatViewClient } from './socketChatViewClient';
 
-	let instances: BrowserChatInstance[] = [];
-	let searching = false;
-	let selected: BrowserChatInstance | undefined;
+	const connectionMessages = {
+		idle: 'Enable remote control in VS Code and open the copied URL.',
+		connecting: 'Connecting…',
+		connected: 'Connected',
+		disconnected: 'Disconnected. Check remote control and use the latest copied URL.',
+	};
+	let state: keyof typeof connectionMessages = 'idle';
+	let error = '';
+	let address = '';
 	let socket: WebSocket | undefined;
-	let connected = false;
 	let opened = false;
-	let status = '';
+	$: connected = state === 'connected';
+	$: status = error || connectionMessages[state];
 
-	async function discover(): Promise<void> {
-		if (searching) return;
-		searching = true;
-		const found = await Promise.all(browserChatPorts.map(async (port) => {
-			const url = `http://127.0.0.1:${port}/`;
-			try {
-				const response = await fetch(`${url}instance`, { signal: AbortSignal.timeout(1500) });
-				if (!response.ok) return undefined;
-				const data = await response.json();
-				if (data.app === 'pelicode' && typeof data.name === 'string' && typeof data.workspace === 'string') {
-					return { ...data, url } as BrowserChatInstance;
-				}
-			} catch {
-				return undefined;
+	function connect(): void {
+		try {
+			const url = new URL(location.href);
+			const key = new URLSearchParams(url.hash.slice(1)).get('key');
+			if (url.protocol !== 'http:' || !key) {
+				throw new Error('Open the complete PeliCode URL, including #key=…');
 			}
-		}));
-		instances = found.filter((instance): instance is BrowserChatInstance => instance !== undefined);
-		searching = false;
-	}
-
-	function select(instance: BrowserChatInstance): void {
-		socket?.close();
-		selected = instance;
-		connected = false;
-		opened = false;
-		status = 'Connecting…';
-		const next = new WebSocket(instance.url.replace('http:', 'ws:') + 'socket');
-		socket = next;
-		next.addEventListener('open', () => {
-			if (socket !== next) return;
-			connected = true;
-			opened = true;
-			status = 'Connected';
-		});
-		const disconnected = () => {
-			if (socket !== next) return;
-			connected = false;
-			status = 'Disconnected';
-		};
-		next.addEventListener('close', disconnected);
-		next.addEventListener('error', disconnected);
-	}
-
-	function showInstances(): void {
-		socket?.close();
-		socket = undefined;
-		selected = undefined;
-		opened = false;
-		connected = false;
-		void discover();
+			address = url.origin;
+			url.protocol = 'ws:';
+			url.pathname = '/socket';
+			url.hash = '';
+			url.search = '';
+			url.searchParams.set('key', key);
+			const next = new WebSocket(url.href);
+			socket?.close();
+			socket = next;
+			state = 'connecting';
+			opened = false;
+			error = '';
+			next.addEventListener('open', () => {
+				if (socket !== next) return;
+				state = 'connected';
+				opened = true;
+			});
+			const disconnected = () => {
+				if (socket === next) state = 'disconnected';
+			};
+			next.addEventListener('close', disconnected);
+			next.addEventListener('error', disconnected);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Connection failed.';
+		}
 	}
 
 	onMount(() => {
-		void discover();
-		const refresh = setInterval(() => { if (!selected) void discover(); }, 5000);
-		return () => { clearInterval(refresh); socket?.close(); };
+		if (location.hash) connect();
+		window.addEventListener('hashchange', connect);
+		return () => {
+			window.removeEventListener('hashchange', connect);
+			socket?.close();
+		};
 	});
 </script>
 
 <main>
-	{#if selected}
-		<header>
-			<button type="button" onclick={showInstances}>← Instances</button>
-			<strong>{selected.name}</strong>
-			<span role="status">{status}</span>
-			{#if !connected}<button type="button" onclick={() => selected && select(selected)}>Reconnect</button>{/if}
-		</header>
-		<section class="chat" aria-label="Chat">
-			{#if socket && opened}
-				{#key socket}
-					{@const connection = socket}
-					<App createClient={(id) => new SocketChatViewClient(connection, id)} {connected} />
-				{/key}
-			{/if}
-		</section>
-	{:else}
-		<section class="instances">
-			<header><h1>PeliCode</h1><span>YOLO</span></header>
-			<p>Select a VS Code workspace.</p>
-			<button type="button" onclick={discover} disabled={searching}>{searching ? 'Searching…' : 'Refresh'}</button>
-			<div class="instance-list">
-				{#each instances as instance (instance.url)}
-					<button class="instance" type="button" onclick={() => select(instance)}>
-						<strong>{instance.name}</strong>
-						<span>{instance.workspace || 'No workspace folder'}</span>
-						<small>{instance.url}</small>
-					</button>
-				{/each}
-			</div>
-			{#if !searching && !instances.length}<p role="status">No PeliCode instances found. Open VS Code with the updated extension.</p>{/if}
-		</section>
-	{/if}
+	<header>
+		<strong>PeliCode</strong>
+		<span role="status">{status}</span>
+		{#if address}<small>{address}</small>{/if}
+		{#if state === 'disconnected'}<button type="button" onclick={connect}>Reconnect</button>{/if}
+	</header>
+	<section class="chat" aria-label="Chat">
+		{#if socket && opened}
+			{#key socket}
+				{@const connection = socket}
+				<App createClient={(id) => new SocketChatViewClient(connection, id)} {connected} />
+			{/key}
+		{/if}
+	</section>
 </main>
 
 <style>
@@ -143,12 +115,8 @@
 	main { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 	header { padding: 12px 16px; border-bottom: 1px solid var(--vscode-panel-border); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 	span, small { color: var(--vscode-descriptionForeground); font-size: 13px; }
-	button { font: inherit; padding: 8px 12px; border: 1px solid var(--vscode-input-border); border-radius: 6px; cursor: pointer; background: var(--vscode-input-background); color: var(--vscode-foreground); }
+	button { font: inherit; padding: 8px 12px; border: 1px solid var(--vscode-input-border); border-radius: 6px; background: var(--vscode-input-background); color: var(--vscode-foreground); }
+	button { cursor: pointer; }
 	button:hover { background: var(--vscode-list-hoverBackground); }
-	button:disabled { opacity: 0.6; cursor: default; }
 	.chat { flex: 1; min-height: 0; }
-	.instances { width: min(640px, 100%); box-sizing: border-box; padding: 24px; margin: 0 auto; overflow-y: auto; }
-	.instances header { padding: 0; justify-content: space-between; }
-	.instance-list { display: grid; gap: 12px; margin-top: 20px; }
-	.instance { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; overflow-wrap: anywhere; }
 </style>

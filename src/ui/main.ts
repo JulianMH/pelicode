@@ -10,5 +10,8 @@ const vscode = (
 
 mount(App, {
 	target: document.getElementById('app')!,
-	props: { createClient: (id: string) => new VscodeChatViewClient(vscode, id) },
+	props: {
+		showRemoteControl: true,
+		createClient: (id: string) => new VscodeChatViewClient(vscode, id),
+	},
 });

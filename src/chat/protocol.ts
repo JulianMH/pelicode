@@ -3,9 +3,12 @@ import type { OpenRouterModel } from './models';
 
 export type Dispose = () => void;
 
+export type RemoteControlState = { enabled: boolean; busy: boolean; url?: string };
+
 export type ChatSummary = { id: string; label: string; thinking: boolean; unread: boolean };
 
 export type WebviewToHostMessage =
+	| { type: 'setRemoteControl'; id: string; enabled: boolean }
 	| { type: 'listChats'; id: string }
 	| { type: 'create'; id: string }
 	| { type: 'ready'; id: string }
@@ -16,11 +19,11 @@ export type WebviewToHostMessage =
 	| { type: 'close'; id: string };
 
 export type HostToWebviewMessage =
+	| { type: 'remoteControlUpdated'; id: string; state: RemoteControlState }
 	| { type: 'chatsUpdated'; id: string; chats: ChatSummary[] }
 	| { type: 'restore'; id: string; messages: ChatEntry[]; model?: OpenRouterModel }
 	| { type: 'costUpdated'; id: string; cost: number }
-	| { type: 'unreadUpdated'; id: string; unread: boolean }
-	| { type: 'entry'; id: string; entry: ChatEntry; final?: boolean }
+	| { type: 'entry'; id: string; entry: ChatEntry }
 	| { type: 'requestStarted'; id: string }
 	| { type: 'requestFinished'; id: string };
 
@@ -30,6 +33,8 @@ export function isWebviewToHostMessage(value: unknown): value is WebviewToHostMe
 	if (typeof message.id !== 'string' || !/^[a-zA-Z0-9_-][a-zA-Z0-9._-]{0,127}$/.test(message.id))
 		return false;
 	switch (message.type) {
+		case 'setRemoteControl':
+			return typeof message.enabled === 'boolean';
 		case 'send':
 			return typeof message.text === 'string' && typeof message.model === 'string';
 		case 'listChats':

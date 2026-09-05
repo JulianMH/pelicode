@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
+import { networkInterfaces } from 'node:os';
 import { WebSocketServer } from 'ws';
-import { browserChatPorts } from './browserDiscovery';
 import { SocketChatViewHost } from './socketChatViewHost';
 import type { ChatViewProvider } from './chatViewProvider';
 
@@ -10,27 +10,22 @@ export class BrowserChatServer {
 	private readonly started: Promise<string>;
 	private disposed = false;
 
-	constructor(html: Uint8Array, provider: ChatViewProvider, name: string, workspace: string) {
+	constructor(html: Uint8Array, provider: ChatViewProvider, instanceKey: string) {
 		this.server = createServer((request, response) => {
-			response.setHeader('Access-Control-Allow-Origin', '*');
-			response.setHeader('Access-Control-Allow-Private-Network', 'true');
-			response.setHeader('Cache-Control', 'no-store');
-			if (request.method === 'OPTIONS') {
-				response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-				response.writeHead(204).end();
-			} else if (request.method === 'GET' && request.url === '/instance') {
-				response.writeHead(200, { 'Content-Type': 'application/json' });
-				response.end(JSON.stringify({ app: 'pelicode', name, workspace }));
-			} else if (request.method === 'GET' && request.url === '/') {
-				response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-				response.end(html);
-			} else {
+			if (request.method !== 'GET' || request.url !== '/') {
 				response.writeHead(404).end();
+				return;
 			}
+			response.writeHead(200, {
+				'Content-Type': 'text/html; charset=utf-8',
+				'Cache-Control': 'no-store',
+				'Referrer-Policy': 'no-referrer',
+			});
+			response.end(html);
 		});
 		this.server.on('upgrade', (request, socket, head) => {
-			if (request.url !== '/socket') {
-				socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+			if (request.url !== `/socket?key=${instanceKey}`) {
+				socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
 				return;
 			}
 			this.sockets.handleUpgrade(request, socket, head, (connection) => {
@@ -39,32 +34,22 @@ export class BrowserChatServer {
 				connection.on('error', () => connection.terminate());
 			});
 		});
-		this.started = this.listen();
-	}
-
-	private async listen(): Promise<string> {
-		for (const port of browserChatPorts) {
-			if (this.disposed) throw new Error('PeliCode server stopped.');
-			try {
-				await new Promise<void>((resolve, reject) => {
-					const onError = (error: Error) => {
-						this.server.off('listening', onListening);
-						reject(error);
-					};
-					const onListening = () => {
-						this.server.off('error', onError);
-						resolve();
-					};
-					this.server.once('error', onError);
-					this.server.once('listening', onListening);
-					this.server.listen(port, '127.0.0.1');
-				});
-				return `http://127.0.0.1:${port}/`;
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+		this.started = new Promise((resolve, reject) => {
+			const host = Object.values(networkInterfaces())
+				.flatMap((addresses) => addresses ?? [])
+				.find((address) => address.family === 'IPv4' && !address.internal)?.address;
+			if (!host) {
+				reject(new Error('No network IPv4 address found. Connect to Wi-Fi or Ethernet and try again.'));
+				return;
 			}
-		}
-		throw new Error('No free PeliCode port in the range 43120–43139.');
+			this.server.once('error', reject);
+			this.server.listen(0, host, () => {
+				const address = this.server.address();
+				if (address && typeof address !== 'string') {
+					resolve(`http://${host}:${address.port}/#key=${instanceKey}`);
+				}
+			});
+		});
 	}
 
 	getUrl(): Promise<string> {
@@ -72,6 +57,7 @@ export class BrowserChatServer {
 	}
 
 	dispose(): void {
+		if (this.disposed) return;
 		this.disposed = true;
 		for (const socket of this.sockets.clients) socket.terminate();
 		this.sockets.close();
