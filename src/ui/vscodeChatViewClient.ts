@@ -3,10 +3,6 @@ import { ChatViewClient } from './chatViewClient';
 
 type VsCodeApi = { postMessage(message: unknown): void };
 
-/**
- * Client transport that carries the ChatView protocol over the VS Code webview
- * message channel (`acquireVsCodeApi().postMessage` / `window` message events).
- */
 export class VscodeChatViewClient extends ChatViewClient {
 	constructor(
 		private readonly vscodeApi: VsCodeApi,

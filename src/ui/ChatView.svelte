@@ -15,7 +15,6 @@
 	export let onThinking: (thinking: boolean) => void = () => {};
 	export let onUnread: (unread: boolean) => void = () => {};
 
-	const INITIAL_MESSAGES: ChatEntry[] = [];
 	const markdown = new MarkdownIt({ breaks: true, linkify: true, typographer: true });
 	const host = new VscodeChatViewClient(vscodeApi, id);
 
@@ -23,7 +22,7 @@
 	let model: OpenRouterModel = defaultModel;
 	let isWaiting = false;
 	let totalCost = 0;
-	let messages: ChatEntry[] = [...INITIAL_MESSAGES];
+	let messages: ChatEntry[] = [];
 	let modelMenuOpen = false;
 	let copyOnWrite = false;
 	let messagesElement: HTMLDivElement;
@@ -34,6 +33,7 @@
 	}
 	onMount(() => {
 		const unsubscribe = host.onMessage(handleMessage);
+		host.ready();
 		void scrollToBottom();
 		return unsubscribe;
 	});
@@ -89,9 +89,6 @@
 		switch (data.type) {
 			case 'restore':
 				if (data.messages.length) {
-					// Assistant messages containing only tool calls are required in the
-					// API history, but have no visible text. Do not render those as
-					// empty bubbles after restoring a chat.
 					messages = data.messages.filter((entry) =>
 						entry.type !== 'assistantMessage' || entry.text.trim().length > 0,
 					);
@@ -139,7 +136,6 @@
 		void scrollToBottom();
 		if (entry.type === 'assistantMessage') setThinking(final === false);
 	}
-	host.ready();
 </script>
 
 <svelte:window onclick={handleWindowClick} />

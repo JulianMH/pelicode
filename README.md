@@ -1,7 +1,7 @@
 # PeliCode
 
 <p align="center">
-  <img src="media/pelican.svg" alt="PeliCode pelican icon" width="128">
+  <img src="logo.png" alt="PeliCode pelican icon" width="128">
 </p>
 
 PeliCode is a very basic chat-agent harness for VS Code for educational purposes 
@@ -68,3 +68,11 @@ Reload the VS Code window after installation.
 During development, the
 `Install Chatbot and Reload` status-bar action rebuilds, installs, and reloads
 the current VSIX when PeliCode is already installed.
+
+Run `npm run compile` for type checks, linting, and a development build.
+
+The code is split into the Svelte UI (`src/ui`), chat coordination and persistence
+(`src/chat/chatViewProvider.ts`), OpenRouter requests (`src/chat/openRouterClient.ts`),
+and workspace tools (`src/chat/tools`). Each tool is a plain object containing its
+API schema and an `execute` function with named arguments. Tool argument parsing
+and result formatting live beside the registry in `src/chat/tools/index.ts`.

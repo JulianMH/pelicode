@@ -1,28 +1,29 @@
 import * as vscode from 'vscode';
-import { Command } from './command';
+import type { Command } from './command';
 import { formatError, getRequiredWorkspaceTarget } from './workspace';
 
-/** Removes a file or folder from the workspace, except protected workspace folders. */
-export class RemoveCommand implements Command {
-	public readonly name = 'rm';
-	public readonly apiTool = {
-		type: 'function' as const,
+export const removeCommand: Command = {
+	apiTool: {
+		type: 'function',
 		function: {
-			name: this.name,
+			name: 'rm',
 			description:
 				'Remove a file or folder from the workspace. The workspace root, .pelicode, and .git folders cannot be removed.',
 			parameters: {
-				type: 'object' as const,
+				type: 'object',
 				properties: {
-					path: { type: 'string', description: 'Workspace-relative file or folder path to remove.' },
+					path: {
+						type: 'string',
+						description: 'Workspace-relative file or folder path to remove.',
+					},
 				},
 				required: ['path'],
-				additionalProperties: false as const,
+				additionalProperties: false,
 			},
 		},
-	};
+	},
 
-	public async execute(path: string): Promise<string> {
+	async execute({ path }) {
 		const target = getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		const normalizedPath = path
@@ -39,5 +40,5 @@ export class RemoveCommand implements Command {
 		} catch (error) {
 			return formatError(error);
 		}
-	}
-}
+	},
+};

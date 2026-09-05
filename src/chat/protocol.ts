@@ -1,13 +1,8 @@
 import type { ChatEntry } from './chatEntry';
 import type { OpenRouterModel } from './models';
 
-/** Unregisters a listener installed through a transport's {@code onMessage}. */
 export type Dispose = () => void;
 
-/**
- * Messages sent from the webview (Svelte) to the extension host
- * (ChatViewProvider). `id` routes a message to a specific chat.
- */
 export type WebviewToHostMessage =
 	| { type: 'ready'; id: string }
 	| { type: 'viewOpened'; id: string }
@@ -16,10 +11,6 @@ export type WebviewToHostMessage =
 	| { type: 'cancel'; id: string }
 	| { type: 'close'; id: string };
 
-/**
- * Messages sent from the extension host (ChatViewProvider) to the webview.
- * `id` routes a message to a specific chat.
- */
 export type HostToWebviewMessage =
 	| { type: 'restore'; id: string; messages: ChatEntry[]; model?: OpenRouterModel }
 	| { type: 'costUpdated'; id: string; cost: number }

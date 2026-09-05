@@ -1,25 +1,24 @@
 import * as vscode from 'vscode';
 import { MAX_DISPLAY_BYTES } from '../constants';
-import { Command } from './command';
+import type { Command } from './command';
 import { formatError, getRequiredWorkspaceTarget } from './workspace';
 
-export class ReadCommand implements Command {
-	public readonly name = 'read';
-	public readonly apiTool = {
-		type: 'function' as const,
+export const readCommand: Command = {
+	apiTool: {
+		type: 'function',
 		function: {
-			name: this.name,
+			name: 'read',
 			description: 'Read the contents of a file in the workspace.',
 			parameters: {
-				type: 'object' as const,
+				type: 'object',
 				properties: { path: { type: 'string', description: 'Workspace-relative file path.' } },
 				required: ['path'],
-				additionalProperties: false as const,
+				additionalProperties: false,
 			},
 		},
-	};
+	},
 
-	public async execute(path: string): Promise<string> {
+	async execute({ path }) {
 		const target = getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		try {
@@ -31,5 +30,5 @@ export class ReadCommand implements Command {
 		} catch (error) {
 			return formatError(error);
 		}
-	}
-}
+	},
+};

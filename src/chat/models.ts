@@ -1,26 +1,8 @@
-export type OpenRouterModel =
-	| 'openai/gpt-5.6-luna'
-	| 'openai/gpt-5.6-terra'
-	| 'openai/gpt-5.6-sol'
-	| 'anthropic/claude-sonnet-5'
-	| 'anthropic/claude-haiku-4.5'
-	| 'anthropic/claude-opus-5'
-	| 'anthropic/claude-fable-5'
-	| 'deepseek/deepseek-v4-flash-0731'
-	| 'nvidia/nemotron-3-ultra-550b-a55b:free'
-	| 'qwen/qwen3.8-27b';
-
 export const defaultModel: OpenRouterModel = 'openai/gpt-5.6-luna';
 
 export type Provider = 'openai' | 'anthropic' | 'deepseek' | 'nvidia' | 'qwen';
 
-export type ModelGroup = {
-	label: string;
-	provider: Provider;
-	models: Array<{ label: string; value: OpenRouterModel }>;
-};
-
-export const modelGroups: ModelGroup[] = [
+export const modelGroups = [
 	{
 		label: 'OpenAI',
 		provider: 'openai',
@@ -60,7 +42,10 @@ export const modelGroups: ModelGroup[] = [
 		provider: 'qwen',
 		models: [{ label: 'Qwen3.8 27B', value: 'qwen/qwen3.8-27b' }],
 	},
-];
+] as const;
+
+export type ModelGroup = (typeof modelGroups)[number];
+export type OpenRouterModel = ModelGroup['models'][number]['value'];
 
 export function modelInfo(value: unknown): { label: string; provider: Provider } | undefined {
 	for (const group of modelGroups) {

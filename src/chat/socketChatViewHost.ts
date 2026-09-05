@@ -3,21 +3,11 @@ import { ChatViewHost } from './chatViewHost';
 import type { Dispose, HostToWebviewMessage, WebviewToHostMessage } from './protocol';
 
 export interface SocketChatViewHostOptions {
-	/** TCP port the host listens on. */
 	port: number;
-	/** Optional interface to bind to; defaults to all interfaces. */
 	host?: string;
 }
 
-/**
- * Host transport that carries the ChatView protocol over the network.
- *
- * Acts as a plain TCP server and frames messages as newline-delimited JSON.
- * This is the server counterpart to a remote peer; it demonstrates the same
- * protocol surface as {@link VscodeChatViewHost} over a raw socket instead of
- * the webview channel. (It is not expected to interoperate with the browser
- * {@code SocketChatViewClient} — which speaks WebSocket — without a gateway.)
- */
+// Uses raw TCP; the browser WebSocket client needs a gateway.
 export class SocketChatViewHost extends ChatViewHost {
 	private readonly server: Server;
 	private connection?: Socket;
@@ -38,7 +28,6 @@ export class SocketChatViewHost extends ChatViewHost {
 		});
 	}
 
-	/** Starts accepting peer connections. Resolves once the socket is bound. */
 	listen(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const onError = (error: Error): void => reject(error);
@@ -64,7 +53,6 @@ export class SocketChatViewHost extends ChatViewHost {
 		};
 	}
 
-	/** Closes the peer connection and stops the server. */
 	dispose(): void {
 		this.connection?.destroy();
 		this.server.close();

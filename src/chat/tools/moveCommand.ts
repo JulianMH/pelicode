@@ -1,28 +1,29 @@
 import * as vscode from 'vscode';
-import { Command } from './command';
+import type { Command } from './command';
 import { formatError, getRequiredWorkspaceTarget } from './workspace';
 
-/** Moves a file or folder to another location in the workspace. */
-export class MoveCommand implements Command {
-	public readonly name = 'mv';
-	public readonly apiTool = {
-		type: 'function' as const,
+export const moveCommand: Command = {
+	apiTool: {
+		type: 'function',
 		function: {
-			name: this.name,
+			name: 'mv',
 			description: 'Move a workspace file or folder to another workspace path.',
 			parameters: {
-				type: 'object' as const,
+				type: 'object',
 				properties: {
 					path: { type: 'string', description: 'Workspace-relative source file or folder path.' },
-					destination: { type: 'string', description: 'Workspace-relative destination file or folder path.' },
+					destination: {
+						type: 'string',
+						description: 'Workspace-relative destination file or folder path.',
+					},
 				},
 				required: ['path', 'destination'],
-				additionalProperties: false as const,
+				additionalProperties: false,
 			},
 		},
-	};
+	},
 
-	public async execute(path: string, _content?: string, destination?: string): Promise<string> {
+	async execute({ path, destination }) {
 		if (destination === undefined) return 'Error: mv requires a string destination argument.';
 		const source = getRequiredWorkspaceTarget(path);
 		if (typeof source === 'string') return source;
@@ -34,5 +35,5 @@ export class MoveCommand implements Command {
 		} catch (error) {
 			return formatError(error);
 		}
-	}
-}
+	},
+};

@@ -1,33 +1,34 @@
 import * as vscode from 'vscode';
-import { Command } from './command';
+import type { Command } from './command';
 import { formatError, getRequiredWorkspaceTarget } from './workspace';
 
 type HunkLine = { marker: ' ' | '+' | '-'; value: string; noNewline: boolean };
 type Hunk = { oldStart?: number; oldCount?: number; newCount?: number; lines: HunkLine[] };
 type OutputLine = { value: string; terminated: boolean };
 
-/** Applies a unified diff to an existing workspace file. */
-export class PatchCommand implements Command {
-	public readonly name = 'patch';
-	public readonly apiTool = {
-		type: 'function' as const,
+export const patchCommand: Command = {
+	apiTool: {
+		type: 'function',
 		function: {
-			name: this.name,
+			name: 'patch',
 			description:
 				'Apply a unified diff to part of an existing workspace file. Use @@ hunk headers; line numbers and line counts are optional. Each hunk must match exactly one location.',
 			parameters: {
-				type: 'object' as const,
+				type: 'object',
 				properties: {
 					path: { type: 'string', description: 'Workspace-relative file path.' },
-					patch: { type: 'string', description: 'Unified diff containing the partial file update.' },
+					patch: {
+						type: 'string',
+						description: 'Unified diff containing the partial file update.',
+					},
 				},
 				required: ['path', 'patch'],
-				additionalProperties: false as const,
+				additionalProperties: false,
 			},
 		},
-	};
+	},
 
-	public async execute(path: string, _content?: string, patch?: string): Promise<string> {
+	async execute({ path, patch }) {
 		if (patch === undefined) return 'Error: patch requires a string patch argument.';
 		const target = getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return formatPatchError(target, patch);
@@ -40,8 +41,8 @@ export class PatchCommand implements Command {
 			const message = error instanceof PatchError ? `Error: ${error.message}` : formatError(error);
 			return formatPatchError(message, patch);
 		}
-	}
-}
+	},
+};
 
 class PatchError extends Error {}
 function formatPatchError(message: string, patch: string): string {

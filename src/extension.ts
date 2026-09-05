@@ -15,4 +15,3 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	void registerDevelopmentTools(context);
 }
-export function deactivate() {}
