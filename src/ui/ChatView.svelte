@@ -14,6 +14,7 @@
 	export let host: ChatViewClient;
 	export let connected = true;
 
+	const client = host;
 	const markdown = new MarkdownIt({ breaks: true, linkify: true, typographer: true });
 
 	let prompt = '';
@@ -31,14 +32,14 @@
 		if (messagesElement) messagesElement.scrollTop = messagesElement.scrollHeight;
 	}
 	onMount(() => {
-		const unsubscribe = host.onMessage(handleMessage);
-		host.ready();
+		const unsubscribe = client.onMessage(handleMessage);
+		client.ready();
 		void scrollToBottom();
 		return unsubscribe;
 	});
 
-	$: if (active) host.viewOpened();
-	$: if (!active) host.viewClosed();
+	$: if (active) client.viewOpened();
+	$: if (!active) client.viewClosed();
 	$: if (active) void scrollToBottom();
 
 	function formatCost(cost: number): string { return `$${cost.toFixed(4)}`; }
@@ -50,12 +51,12 @@
 		if (!text || !connected || isWaiting) return;
 		isWaiting = true;
 		sentPrompt = text;
-		host.send(text, model);
+		client.send(text, model);
 		void scrollToBottom();
 	}
 	function cancel(): void {
 		isWaiting = false;
-		host.cancel();
+		client.cancel();
 	}
 	function selectModel(value: OpenRouterModel): void {
 		model = value;

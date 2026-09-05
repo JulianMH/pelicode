@@ -129,6 +129,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				return;
 			case 'viewOpened':
 				this.openChats.set(host, chatModel.id);
+				if (!chatModel.isUnread) return;
 				chatModel.isUnread = false;
 				this.persist(chatModel);
 				this.updateChats();
