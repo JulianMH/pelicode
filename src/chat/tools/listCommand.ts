@@ -25,7 +25,7 @@ export const listCommand: Command = {
 	},
 
 	async execute({ path }) {
-		const target = getWorkspaceTarget(path);
+		const target = await getWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		try {
 			const entries = await vscode.workspace.fs.readDirectory(target);

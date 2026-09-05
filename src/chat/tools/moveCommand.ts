@@ -25,9 +25,9 @@ export const moveCommand: Command = {
 
 	async execute({ path, destination }) {
 		if (destination === undefined) return 'Error: mv requires a string destination argument.';
-		const source = getRequiredWorkspaceTarget(path);
+		const source = await getRequiredWorkspaceTarget(path);
 		if (typeof source === 'string') return source;
-		const target = getRequiredWorkspaceTarget(destination);
+		const target = await getRequiredWorkspaceTarget(destination);
 		if (typeof target === 'string') return target;
 		try {
 			await vscode.workspace.fs.rename(source, target, { overwrite: false });

@@ -24,7 +24,7 @@ export const removeCommand: Command = {
 	},
 
 	async execute({ path }) {
-		const target = getRequiredWorkspaceTarget(path);
+		const target = await getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		const normalizedPath = path
 			.replace(/\\/g, '/')

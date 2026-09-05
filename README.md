@@ -34,7 +34,7 @@ coding agent.
 
 ## Features still under development
 
-- [ ] Keep PeliCode file access strictly inside trusted workspace folders.
+- [x] Keep PeliCode file access strictly inside trusted workspace folders.
 - [ ] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
 - [ ] Extend PeliCode to accept remote control from other devices via WebSockets.
 - [ ] Support selecting files across multi-root workspaces.

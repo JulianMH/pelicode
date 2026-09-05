@@ -19,7 +19,7 @@ export const readCommand: Command = {
 	},
 
 	async execute({ path }) {
-		const target = getRequiredWorkspaceTarget(path);
+		const target = await getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		try {
 			const bytes = await vscode.workspace.fs.readFile(target);

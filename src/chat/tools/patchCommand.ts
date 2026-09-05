@@ -30,7 +30,7 @@ export const patchCommand: Command = {
 
 	async execute({ path, patch }) {
 		if (patch === undefined) return 'Error: patch requires a string patch argument.';
-		const target = getRequiredWorkspaceTarget(path);
+		const target = await getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return formatPatchError(target, patch);
 		try {
 			const original = new TextDecoder().decode(await vscode.workspace.fs.readFile(target));

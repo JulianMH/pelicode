@@ -23,7 +23,7 @@ export const writeCommand: Command = {
 
 	async execute({ path, content }) {
 		if (content === undefined) return 'Error: write requires a string content argument.';
-		const target = getRequiredWorkspaceTarget(path);
+		const target = await getRequiredWorkspaceTarget(path);
 		if (typeof target === 'string') return target;
 		try {
 			const bytes = new TextEncoder().encode(content);
