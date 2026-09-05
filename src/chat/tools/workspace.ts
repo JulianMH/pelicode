@@ -14,7 +14,7 @@ export async function getWorkspaceTarget(path: string): Promise<vscode.Uri | str
 	}
 
 	const parts = normalizedPath.split('/').filter((part) => part && part !== '.');
-	const workspace = selectWorkspace(workspaces, parts);
+	const workspace = selectWorkspace(workspaces, workspaces.length === 1 ? undefined : parts[0]);
 	if (typeof workspace === 'string') return workspace;
 	const relativePath = workspaces.length === 1 ? parts.join('/') : parts.slice(1).join('/');
 	const target = vscode.Uri.joinPath(workspace.uri, relativePath);
@@ -41,6 +41,12 @@ export function getTrustedWorkspaceFolders(): vscode.WorkspaceFolder[] | string 
 	return [...workspaces];
 }
 
+export function getWorkspaceRoot(name: string): vscode.WorkspaceFolder | string {
+	const workspaces = getTrustedWorkspaceFolders();
+	if (typeof workspaces === 'string') return workspaces;
+	return selectWorkspace(workspaces, name || undefined);
+}
+
 export function isProtectedWorkspacePath(target: vscode.Uri): boolean {
 	const workspaces = vscode.workspace.workspaceFolders ?? [];
 	return workspaces.some((workspace) =>
@@ -54,10 +60,9 @@ export function isProtectedWorkspacePath(target: vscode.Uri): boolean {
 
 function selectWorkspace(
 	workspaces: vscode.WorkspaceFolder[],
-	parts: string[],
+	name: string | undefined,
 ): vscode.WorkspaceFolder | string {
 	if (workspaces.length === 1) return workspaces[0];
-	const name = parts[0];
 	if (!name) {
 		return `Error: Specify a workspace folder: ${workspaces.map((workspace) => workspace.name).join(', ')}.`;
 	}

@@ -43,7 +43,7 @@ coding agent.
 - [ ] Add an adversarial mode with an implementer and reviewer agent.
 - [ ] Let users choose tool permission presets, including read-only access.
 - [ ] Add an evaluation tool for checking agent work.
-- [ ] Add focused Git tools for common repository tasks.
+- [x] Add read-only Git tools for common repository tasks.
 
 ## OpenRouter
 

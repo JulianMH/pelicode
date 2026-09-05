@@ -1,11 +1,12 @@
 import type { ChatEntry, ChatToolCall } from '../chatEntry';
-import type { Command } from './command';
+import type { Command, ToolArguments } from './command';
 import { listCommand } from './listCommand';
 import { patchCommand } from './patchCommand';
 import { readCommand } from './readCommand';
 import { writeCommand } from './writeCommand';
 import { moveCommand } from './moveCommand';
 import { removeCommand } from './removeCommand';
+import { gitCommand } from './gitCommand';
 
 export type { ApiTool, Command } from './command';
 
@@ -16,6 +17,7 @@ export const commands: Command[] = [
 	patchCommand,
 	removeCommand,
 	moveCommand,
+	gitCommand,
 ];
 
 export async function executeToolCall(toolCall: ChatToolCall): Promise<ChatEntry> {
@@ -31,18 +33,29 @@ export async function executeToolCall(toolCall: ChatToolCall): Promise<ChatEntry
 	}
 	if (args) {
 		const command = commands.find((candidate) => candidate.apiTool.function.name === toolCall.name);
+		const toolArguments: ToolArguments = {
+			path: typeof args.path === 'string' ? args.path : '',
+			content: typeof args.content === 'string' ? args.content : undefined,
+			patch: typeof args.patch === 'string' ? args.patch : undefined,
+			destination: typeof args.destination === 'string' ? args.destination : undefined,
+			command: typeof args.command === 'string' ? args.command : undefined,
+		};
 		result = command
-			? await command.execute({
-					path: typeof args.path === 'string' ? args.path : '',
-					content: typeof args.content === 'string' ? args.content : undefined,
-					patch: typeof args.patch === 'string' ? args.patch : undefined,
-					destination: typeof args.destination === 'string' ? args.destination : undefined,
-				})
+			? await command.execute(toolArguments)
 			: `Error: unknown tool "${toolCall.name}".`;
+		const invocation =
+			toolCall.name === 'git' && toolArguments.command
+				? toolArguments.command
+				: `${toolCall.name}${typeof args.path === 'string' ? ` ${args.path}` : ''}`;
+		return {
+			type: 'tool',
+			text: `@${invocation}\n${result}`,
+			rawOpenRouterPayload: { role: 'tool', content: result, tool_call_id: toolCall.id },
+		};
 	}
 	return {
 		type: 'tool',
-		text: `@${toolCall.name}${typeof args?.path === 'string' ? ` ${args.path}` : ''}\n${result}`,
+		text: `@${toolCall.name}\n${result}`,
 		rawOpenRouterPayload: { role: 'tool', content: result, tool_call_id: toolCall.id },
 	};
 }

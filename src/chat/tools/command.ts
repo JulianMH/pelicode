@@ -22,4 +22,5 @@ export type ToolArguments = {
 	content?: string;
 	patch?: string;
 	destination?: string;
+	command?: string;
 };
