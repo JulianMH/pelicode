@@ -36,7 +36,7 @@ coding agent.
 
 - [x] Keep PeliCode file access strictly inside trusted workspace folders.
 - [ ] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
-- [ ] Extend PeliCode to accept remote control from other devices via WebSockets.
+- [x] Extend PeliCode to accept remote control from other devices via WebSockets.
 - [ ] Support selecting files across multi-root workspaces.
 - [ ] Give each chat its own Git branch workspace.
 - [ ] Compare several models and rank their answers by quality, time, and cost.
@@ -76,3 +76,29 @@ The code is split into the Svelte UI (`src/ui`), chat coordination and persisten
 and workspace tools (`src/chat/tools`). Each tool is a plain object containing its
 API schema and an `execute` function with named arguments. Tool argument parsing
 and result formatting live beside the registry in `src/chat/tools/index.ts`.
+
+
+## Browser chat and HTML export
+
+PeliCode starts its browser server automatically when the extension activates.
+Each VS Code window takes a free localhost port in the range **43120–43139**.
+The HTML page discovers these instances and lists their workspace names and paths.
+Select an instance to open the same chat UI and tabs as in the VS Code sidebar.
+New and closed tabs, messages, costs, and request state are synchronized.
+
+Run **PeliCode: Open Browser Chat** from the Command Palette to open the instance
+picker, or use `npm run dev` and open `http://127.0.0.1:5173/chat.html`.
+The picker refreshes every five seconds and also has a manual refresh button.
+Use **Instances** to switch workspaces and **Reconnect** after a dropped connection.
+The extension sidebar can remain closed.
+
+`npm run compile` and `npm run package` build the extension and standalone
+`dist/chat.html`. `npm run export:html` exports just the HTML, including its
+JavaScript and styles. `npm run dev` serves the frontend and rebuilds it on
+changes; reload the page to see them. The backend runs in VS Code, so install
+or rebuild the updated extension and reload its window for backend changes.
+
+The current mode is **YOLO**: no authentication, tokens, or origin restrictions.
+Servers bind to `127.0.0.1`; discovery supports up to 20 simultaneous instances on
+the same machine. Connecting from a smartphone to another machine is not included
+in this version. The OpenRouter API key remains in the extension host.

@@ -1,11 +1,15 @@
 import type { ChatEntry } from './chatEntry';
 import type { OpenRouterModel } from './models';
-import type { Dispose, HostToWebviewMessage, WebviewToHostMessage } from './protocol';
+import type { ChatSummary, Dispose, HostToWebviewMessage, WebviewToHostMessage } from './protocol';
 
 export abstract class ChatViewHost {
 	protected abstract post(message: HostToWebviewMessage): void;
 
 	abstract onMessage(listener: (message: WebviewToHostMessage) => void): Dispose;
+
+	chatsUpdated(chats: ChatSummary[]): void {
+		this.post({ type: 'chatsUpdated', id: '', chats });
+	}
 
 	restore(id: string, messages: ChatEntry[], model?: OpenRouterModel): void {
 		this.post({ type: 'restore', id, messages, model });

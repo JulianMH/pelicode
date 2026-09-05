@@ -2,7 +2,13 @@ import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import type { ChatEntry, ChatToolCall, OpenRouterMessage } from './chatEntry';
 import { ChatModel } from './chatModel';
-import { ChatViewHost } from './chatViewHost';
+import type { ChatViewHost } from './chatViewHost';
+import {
+	isWebviewToHostMessage,
+	type ChatSummary,
+	type Dispose,
+	type WebviewToHostMessage,
+} from './protocol';
 import { VscodeChatViewHost } from './vscodeChatViewHost';
 import { executeToolCall } from './tools';
 import { defaultModel, isOpenRouterModel, type OpenRouterModel } from './models';
@@ -20,80 +26,126 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private readonly chatDirectory?: vscode.Uri;
 	private readonly modelsLoaded: Promise<void>;
 	private view?: vscode.WebviewView;
-	private host?: ChatViewHost;
-	private openChatId?: string;
+	private readonly hosts = new Map<ChatViewHost, Dispose>();
+	private readonly openChats = new Map<ChatViewHost, string>();
 	public constructor(private readonly extensionUri: vscode.Uri) {
 		const workspace = vscode.workspace.workspaceFolders?.[0];
 		this.chatDirectory = workspace
 			? vscode.Uri.joinPath(workspace.uri, '.pelicode', 'chat')
 			: undefined;
-		this.modelsLoaded = this.loadChatModels();
+		this.modelsLoaded = this.loadChatModels().then(() => {
+			if (!this.chatModels.size) this.getChatModel('default');
+		});
 	}
 	public async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
 		await this.modelsLoaded;
 		this.view = view;
-		this.host = new VscodeChatViewHost(view.webview);
+		const disconnect = this.connectHost(new VscodeChatViewHost(view.webview));
 		this.updateBadge();
 		view.onDidDispose(() => {
 			if (this.view === view) this.view = undefined;
-			this.host = undefined;
-			this.openChatId = undefined;
+			disconnect();
 		});
 		view.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')],
 		};
 		view.webview.html = this.getHtml(view.webview);
-		this.host.onMessage((message) => {
-			const chatModel = this.getChatModel(message.id);
-			switch (message.type) {
-				case 'close':
-					chatModel.activeRequest?.abort();
-					chatModel.activeRequest = undefined;
-					if (this.openChatId === chatModel.id) this.openChatId = undefined;
-					this.chatModels.delete(chatModel.id);
-					void this.removeChatModel(chatModel.id);
-					this.updateBadge();
-					return;
-				case 'cancel':
-					chatModel.activeRequest?.abort();
-					chatModel.activeRequest = undefined;
-					this.updateBadge();
-					this.host?.requestFinished(chatModel.id);
-					return;
-				case 'ready':
-					this.host?.restore(chatModel.id, chatModel.messages, chatModel.activeModel);
-					this.host?.costUpdated(chatModel.id, chatModel.totalCost);
-					return;
-				case 'viewOpened':
-					this.openChatId = chatModel.id;
-					chatModel.isUnread = false;
-					this.updateBadge();
-					this.host?.unreadUpdated(chatModel.id, false);
-					return;
-				case 'viewClosed':
-					if (this.openChatId === chatModel.id) this.openChatId = undefined;
-					return;
-				case 'send': {
-					const text = message.text.trim();
-					if (!text) return;
-					const model = isOpenRouterModel(message.model) ? message.model : defaultModel;
-					this.recordModelSwitch(chatModel, model);
-					chatModel.activeRequest?.abort();
-					const controller = new AbortController();
-					chatModel.activeRequest = controller;
-					this.updateBadge();
-					void this.reply(chatModel, text, model, controller.signal).finally(() => {
-						if (chatModel.activeRequest === controller) {
-							chatModel.activeRequest = undefined;
-							this.updateBadge();
-						}
-					});
-					return;
-				}
-			}
-		});
 	}
+	public connectHost(host: ChatViewHost): Dispose {
+		const unsubscribe = host.onMessage((message) => {
+			if (!isWebviewToHostMessage(message)) return;
+			void this.modelsLoaded.then(() => {
+				if (this.hosts.has(host)) this.handleMessage(host, message);
+			});
+		});
+		this.hosts.set(host, unsubscribe);
+		return () => {
+			unsubscribe();
+			this.hosts.delete(host);
+			this.openChats.delete(host);
+		};
+	}
+	public dispose(): void {
+		for (const unsubscribe of this.hosts.values()) unsubscribe();
+		this.hosts.clear();
+		this.openChats.clear();
+		for (const model of this.chatModels.values()) model.activeRequest?.abort();
+	}
+	private broadcast(send: (host: ChatViewHost) => void): void {
+		for (const host of this.hosts.keys()) send(host);
+	}
+	private handleMessage(host: ChatViewHost, message: WebviewToHostMessage): void {
+		if (message.type === 'listChats') {
+			host.chatsUpdated(this.getChatSummaries());
+			return;
+		}
+		const chatModel =
+			message.type === 'create' ? this.getChatModel(message.id) : this.chatModels.get(message.id);
+		if (!chatModel) return;
+		switch (message.type) {
+			case 'create':
+				this.persist(chatModel);
+				this.updateBadge();
+				return;
+			case 'close':
+				chatModel.activeRequest?.abort();
+				chatModel.activeRequest = undefined;
+				for (const [peer, id] of this.openChats) {
+					if (id === chatModel.id) this.openChats.delete(peer);
+				}
+				this.chatModels.delete(chatModel.id);
+				this.broadcast((peer) => {
+					peer.restore(chatModel.id, []);
+					peer.costUpdated(chatModel.id, 0);
+					peer.unreadUpdated(chatModel.id, false);
+					peer.requestFinished(chatModel.id);
+				});
+				void this.removeChatModel(chatModel.id);
+				this.updateBadge();
+				return;
+			case 'cancel':
+				chatModel.activeRequest?.abort();
+				chatModel.activeRequest = undefined;
+				this.updateBadge();
+				this.broadcast((host) => host.requestFinished(chatModel.id));
+				return;
+			case 'ready':
+				host.restore(chatModel.id, chatModel.messages, chatModel.activeModel);
+				host.costUpdated(chatModel.id, chatModel.totalCost);
+				host.unreadUpdated(chatModel.id, chatModel.isUnread);
+				if (chatModel.activeRequest) host.requestStarted(chatModel.id);
+				else host.requestFinished(chatModel.id);
+				return;
+			case 'viewOpened':
+				this.openChats.set(host, chatModel.id);
+				chatModel.isUnread = false;
+				this.persist(chatModel);
+				this.updateBadge();
+				this.broadcast((host) => host.unreadUpdated(chatModel.id, false));
+				return;
+			case 'viewClosed':
+				if (this.openChats.get(host) === chatModel.id) this.openChats.delete(host);
+				return;
+			case 'send': {
+				const text = message.text.trim();
+				if (!text || chatModel.activeRequest) return;
+				const model = isOpenRouterModel(message.model) ? message.model : defaultModel;
+				this.recordModelSwitch(chatModel, model);
+				const controller = new AbortController();
+				chatModel.activeRequest = controller;
+				this.updateBadge();
+				void this.reply(chatModel, text, model, controller.signal).finally(() => {
+					if (chatModel.activeRequest === controller) {
+						chatModel.activeRequest = undefined;
+						this.updateBadge();
+					}
+				});
+				return;
+			}
+		}
+	}
+
 	private recordModelSwitch(chatModel: ChatModel, model: OpenRouterModel): void {
 		const lastSwitch = [...chatModel.messages]
 			.reverse()
@@ -182,7 +234,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		);
 		await removal.catch(() => undefined);
 	}
+	private getChatSummaries(): ChatSummary[] {
+		return [...this.chatModels.values()].map((model, index) => ({
+			id: model.id,
+			label: `Chat ${index + 1}`,
+			thinking: !!model.activeRequest,
+			unread: model.isUnread,
+		}));
+	}
 	private updateBadge(): void {
+		const chats = this.getChatSummaries();
+		this.broadcast((host) => host.chatsUpdated(chats));
 		if (!this.view) return;
 		const count = [...this.chatModels.values()].filter(
 			(chatModel) => chatModel.isUnread || chatModel.activeRequest !== undefined,
@@ -199,14 +261,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		signal: AbortSignal,
 	): Promise<void> {
 		if (prompt)
-			chatModel.messages.push({
+			this.appendEntry(chatModel, {
 				type: 'userMessage',
 				text: prompt,
 				rawOpenRouterPayload: { role: 'user', content: prompt },
 			});
-		if (prompt) this.persist(chatModel);
 		try {
-			this.host?.requestStarted(chatModel.id);
+			this.broadcast((host) => host.requestStarted(chatModel.id));
 			const response = await requestOpenRouter(
 				toApiMessages(chatModel.messages, model),
 				model,
@@ -217,7 +278,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			if (signal.aborted) return;
 			chatModel.totalCost += response.cost;
 			this.persist(chatModel);
-			this.host?.costUpdated(chatModel.id, chatModel.totalCost);
+			this.broadcast((host) => host.costUpdated(chatModel.id, chatModel.totalCost));
 			const reasoning = extractReasoning(response.reasoningDetails);
 			if (reasoning) {
 				const entry: ChatEntry = { type: 'reasoning', text: reasoning };
@@ -236,7 +297,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				const entry: ChatEntry = { type: 'assistantMessage', text: content, rawOpenRouterPayload };
 				chatModel.messages.push(entry);
 				this.persist(chatModel);
-				if (content) this.host?.entry(chatModel.id, entry, !response.toolCalls?.length);
+				if (content)
+					this.broadcast((host) => host.entry(chatModel.id, entry, !response.toolCalls?.length));
 			}
 			if (response.toolCalls?.length) {
 				for (const toolCall of response.toolCalls) {
@@ -246,20 +308,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				await this.reply(chatModel, '', model, signal);
 				return;
 			}
-			this.host?.requestFinished(chatModel.id);
+			this.broadcast((host) => host.requestFinished(chatModel.id));
 			this.markUnread(chatModel);
 		} catch (error) {
-			if (signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
-				this.host?.requestFinished(chatModel.id);
-				return;
-			}
-			if (prompt) chatModel.messages.pop();
+			if (signal.aborted) return;
 			const entry: ChatEntry = {
 				type: 'assistantMessage',
 				text: error instanceof Error ? error.message : 'OpenRouter request failed.',
 			};
 			this.appendEntry(chatModel, entry, true);
-			this.host?.requestFinished(chatModel.id);
+			this.broadcast((host) => host.requestFinished(chatModel.id));
 			this.markUnread(chatModel);
 		} finally {
 			this.updateBadge();
@@ -268,13 +326,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private appendEntry(chatModel: ChatModel, entry: ChatEntry, final?: boolean): void {
 		chatModel.messages.push(entry);
 		this.persist(chatModel);
-		this.host?.entry(chatModel.id, entry, final);
+		this.broadcast((host) => host.entry(chatModel.id, entry, final));
 	}
 	private markUnread(chatModel: ChatModel): void {
-		chatModel.isUnread = this.openChatId !== chatModel.id;
+		chatModel.isUnread = ![...this.openChats.values()].includes(chatModel.id);
 		this.persist(chatModel);
 		this.updateBadge();
-		this.host?.unreadUpdated(chatModel.id, chatModel.isUnread);
+		this.broadcast((host) => host.unreadUpdated(chatModel.id, chatModel.isUnread));
 	}
 	private async runTool(
 		chatModel: ChatModel,
@@ -288,11 +346,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	private getHtml(webview: vscode.Webview): string {
 		const nonce = randomBytes(16).toString('base64');
-		const initialChatIds = this.chatModels.size > 0 ? [...this.chatModels.keys()] : ['default'];
-		const initialChatIdsJson = JSON.stringify(initialChatIds).replace(/</g, '\\u003c');
 		const scriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.js'),
 		);
-		return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>Code AI Chat</title></head><body><div id="app"></div><script nonce="${nonce}">window.__pelicodeInitialChatIds=${initialChatIdsJson};</script><script nonce="${nonce}" src="${scriptUri}"></script></body></html>`;
+		return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>Code AI Chat</title></head><body><div id="app"></div><script nonce="${nonce}" src="${scriptUri}"></script></body></html>`;
 	}
 }

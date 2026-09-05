@@ -8,6 +8,14 @@ export abstract class ChatViewClient {
 
 	abstract onMessage(listener: (message: HostToWebviewMessage) => void): Dispose;
 
+	listChats(): void {
+		this.post({ type: 'listChats', id: this.chatId });
+	}
+
+	create(): void {
+		this.post({ type: 'create', id: this.chatId });
+	}
+
 	ready(): void {
 		this.post({ type: 'ready', id: this.chatId });
 	}

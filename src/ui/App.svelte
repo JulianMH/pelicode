@@ -1,49 +1,41 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import ChatView from './ChatView.svelte';
-	import { VscodeChatViewClient } from './vscodeChatViewClient';
+	import type { ChatViewClient } from './chatViewClient';
+	import type { ChatSummary } from '../chat/protocol';
 	import PelicanIcon from './PelicanIcon.svelte';
 
-	type ChatTab = { id: string; label: string; thinking: boolean; unread: boolean };
-	type VsCodeApi = { postMessage(message: unknown): void };
-	type InitialChatWindow = Window & { __pelicodeInitialChatIds?: unknown };
-	const initialIds = (() => {
-		const ids = (window as InitialChatWindow).__pelicodeInitialChatIds;
-		return Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string' && id.length > 0)
-			? ids
-			: ['default'];
-	})();
-	let tabs: ChatTab[] = initialIds.map((id, index) => ({
-		id, label: `Chat ${index + 1}`, thinking: false, unread: false
-	}));
-	let activeTab = tabs[0].id;
-	let nextTabNumber = tabs.length + 1;
-	const vscode = (window as unknown as {
-		acquireVsCodeApi(): VsCodeApi;
-	}).acquireVsCodeApi();
+	export let createClient: (id: string) => ChatViewClient;
+	export let connected = true;
+
+	type ChatTab = ChatSummary & { client: ChatViewClient };
+	const client = createClient('default');
+	let tabs: ChatTab[] = [];
+	let activeTab = '';
+
+	onMount(() => {
+		const unsubscribe = client.onMessage((message) => {
+			if (message.type !== 'chatsUpdated') return;
+			const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.id === activeTab));
+			tabs = message.chats.map((chat) => ({
+				...chat,
+				client: tabs.find((tab) => tab.id === chat.id)?.client ?? createClient(chat.id),
+			}));
+			if (!tabs.some((tab) => tab.id === activeTab)) {
+				activeTab = tabs[Math.min(activeIndex, tabs.length - 1)]?.id ?? '';
+			}
+		});
+		client.listChats();
+		return unsubscribe;
+	});
 
 	function addTab(): void {
-		let number = nextTabNumber++;
-		while (tabs.some((tab) => tab.id === `chat-view-${number}`)) number = nextTabNumber++;
-		const tab = { id: `chat-view-${number}`, label: `Chat ${number}`, thinking: false, unread: false };
-		tabs = [...tabs, tab];
-		activeTab = tab.id;
+		if (!connected) return;
+		activeTab = crypto.randomUUID();
+		createClient(activeTab).create();
 	}
 	function closeTab(id: string): void {
-		const index = tabs.findIndex((tab) => tab.id === id);
-		if (index < 0) return;
-		const wasActive = activeTab === id;
-		tabs = tabs.filter((tab) => tab.id !== id);
-		new VscodeChatViewClient(vscode, id).close();
-		if (wasActive) {
-			const replacement = tabs[Math.min(index, tabs.length - 1)];
-			if (replacement) activeTab = replacement.id;
-		}
-	}
-	function setTabThinking(id: string, thinking: boolean): void {
-		tabs = tabs.map((tab) => tab.id === id ? { ...tab, thinking } : tab);
-	}
-	function setTabUnread(id: string, unread: boolean): void {
-		tabs = tabs.map((tab) => tab.id === id ? { ...tab, unread } : tab);
+		if (connected) tabs.find((tab) => tab.id === id)?.client.close();
 	}
 </script>
 
@@ -70,7 +62,7 @@
 						</span>
 					{/if}
 				</button>
-				<button type="button" class="close-tab" title="Close {tab.label}" aria-label="Close {tab.label}" onclick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</button>
+				<button type="button" class="close-tab" disabled={!connected} title="Close {tab.label}" aria-label="Close {tab.label}" onclick={(event) => { event.stopPropagation(); closeTab(tab.id); }}>×</button>
 			</div>
 		{/each}
 		<button
@@ -79,6 +71,7 @@
 			title="New Chat"
 			aria-label="New Chat"
 			onclick={addTab}
+			disabled={!connected}
 		>
 			{#if tabs.length === 0}
 				New Chat +
@@ -96,7 +89,7 @@
 		{:else}
 			{#each tabs as tab (tab.id)}
 				<div class:hidden={activeTab !== tab.id}>
-					<ChatView id={tab.id} active={activeTab === tab.id} vscodeApi={vscode} onThinking={(thinking) => setTabThinking(tab.id, thinking)} onUnread={(unread) => setTabUnread(tab.id, unread)} />
+					<ChatView id={tab.id} active={connected && activeTab === tab.id} host={tab.client} {connected} />
 				</div>
 			{/each}
 		{/if}
@@ -104,7 +97,7 @@
 </main>
 
 <style>
-	:global(html), :global(body) { height: 100%; }
+	:global(html), :global(body), :global(#app) { height: 100%; }
 	:global(body) {
 		color: var(--vscode-foreground);
 		font-family: var(--vscode-font-family);
@@ -112,8 +105,9 @@
 		overflow: hidden;
 	}
 
-	main { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+	main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 	.tabs {
+		overflow-x: auto;
 		background: var(--vscode-editorGroupHeader-tabsBackground);
 		border-bottom: 1px solid var(--vscode-panel-border);
 		display: flex;

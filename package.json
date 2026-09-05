@@ -45,10 +45,15 @@
       {
         "command": "pelicode.installCurrentVsix",
         "title": "Install Current VSIX"
+      },
+      {
+        "command": "pelicode.openBrowserChat",
+        "title": "PeliCode: Open Browser Chat"
       }
     ]
   },
   "scripts": {
+    "dev": "node esbuild.js --dev",
     "vscode:prepublish": "npm run package",
     "compile": "npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
@@ -58,13 +63,15 @@
     "check-types": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{ts,svelte}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,svelte}\""
+    "format:check": "prettier --check \"src/**/*.{ts,svelte}\"",
+    "export:html": "npm run check-types && npm run lint && node esbuild.js --html-only --production"
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "24.x",
     "@types/vscode": "^1.125.0",
+    "@types/ws": "^8.18.1",
     "dompurify": "^3.4.13",
     "esbuild": "^0.28.1",
     "esbuild-svelte": "^0.9.5",
@@ -76,7 +83,8 @@
     "svelte": "^5.56.9",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.1"
+    "typescript-eslint": "^8.61.1",
+    "ws": "^8.21.3"
   },
   "overrides": {
     "diff": "^8.0.4",

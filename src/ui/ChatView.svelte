@@ -2,23 +2,24 @@
 	import DOMPurify from 'dompurify';
 	import MarkdownIt from 'markdown-it';
 	import { onMount, tick } from 'svelte';
-	import { defaultModel, modelGroups, modelInfo, providerOf, type OpenRouterModel } from '../chat/models';
+	import { defaultModel, isOpenRouterModel, modelGroups, modelInfo, providerOf, type OpenRouterModel } from '../chat/models';
 	import type { ChatEntry } from '../chat/chatEntry';
 	import type { HostToWebviewMessage } from '../chat/protocol';
 	import { SYSTEM_PROMPT } from '../chat/prompt';
-	import { VscodeChatViewClient } from './vscodeChatViewClient';
+	import type { ChatViewClient } from './chatViewClient';
 	import PelicanIcon from './PelicanIcon.svelte';
 
 	export let id: string = 'chat-view';
 	export let active = false;
-	export let vscodeApi: { postMessage(message: unknown): void };
+	export let host: ChatViewClient;
+	export let connected = true;
 	export let onThinking: (thinking: boolean) => void = () => {};
 	export let onUnread: (unread: boolean) => void = () => {};
 
 	const markdown = new MarkdownIt({ breaks: true, linkify: true, typographer: true });
-	const host = new VscodeChatViewClient(vscodeApi, id);
 
 	let prompt = '';
+	let sentPrompt: string | undefined;
 	let model: OpenRouterModel = defaultModel;
 	let isWaiting = false;
 	let totalCost = 0;
@@ -54,11 +55,10 @@
 	}
 	function send(): void {
 		const text = prompt.trim();
-		if (!text) return;
-		messages = [...messages, { type: 'userMessage', text }];
+		if (!text || !connected || isWaiting) return;
 		setThinking(true);
+		sentPrompt = text;
 		host.send(text, model);
-		prompt = '';
 		void scrollToBottom();
 	}
 	function cancel(): void {
@@ -88,13 +88,11 @@
 		if (data.id !== id) return;
 		switch (data.type) {
 			case 'restore':
-				if (data.messages.length) {
-					messages = data.messages.filter((entry) =>
-						entry.type !== 'assistantMessage' || entry.text.trim().length > 0,
-					);
-					void scrollToBottom();
-				}
-				if (data.model) model = data.model;
+				messages = data.messages.filter((entry) =>
+					entry.type !== 'assistantMessage' || entry.text.trim().length > 0,
+				);
+				void scrollToBottom();
+				model = data.model ?? defaultModel;
 				break;
 			case 'costUpdated':
 				totalCost = data.cost;
@@ -111,28 +109,19 @@
 				handleEntry(data.entry, data.final);
 				break;
 			case 'requestFinished':
+				sentPrompt = undefined;
 				setThinking(false);
 				void scrollToBottom();
 				break;
 		}
 	}
 	function handleEntry(entry: ChatEntry, final?: boolean): void {
-		if (entry.type === 'modelSwitch') {
-			// The composer adds the user message optimistically. Keep the protocol
-			// marker directly before it, matching the persisted conversation order.
-			let userIndex = -1;
-			for (let index = messages.length - 1; index >= 0; index -= 1) {
-				if (messages[index]?.type === 'userMessage') {
-					userIndex = index;
-					break;
-				}
-			}
-			messages = userIndex >= 0
-				? [...messages.slice(0, userIndex), entry, ...messages.slice(userIndex)]
-				: [...messages, entry];
-		} else {
-			messages = [...messages, entry];
+		messages = [...messages, entry];
+		if (entry.type === 'userMessage' && entry.text === sentPrompt) {
+			prompt = '';
+			sentPrompt = undefined;
 		}
+		if (entry.type === 'modelSwitch' && isOpenRouterModel(entry.text)) model = entry.text;
 		void scrollToBottom();
 		if (entry.type === 'assistantMessage') setThinking(final === false);
 	}
@@ -224,8 +213,8 @@
 						</button>
 					</div>
 					<form class="composer-form" onsubmit={(event) => { event.preventDefault(); send(); }}>
-						<textarea bind:value={prompt} onkeydown={handlePromptKeydown} aria-label="Chat message" placeholder="Ask about your code" rows="2"></textarea>
-						<button type="submit" class="send-btn" aria-label="Send message" disabled={!prompt.trim()}>➤</button>
+						<textarea disabled={!connected} bind:value={prompt} onkeydown={handlePromptKeydown} aria-label="Chat message" placeholder="Ask about your code" rows="2"></textarea>
+						<button type="submit" class="send-btn" aria-label="Send message" disabled={!prompt.trim() || !connected}>➤</button>
 					</form>
 				</div>
 			</div>
