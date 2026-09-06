@@ -40,7 +40,7 @@ export const patchCommand: Command = {
 			const original = new TextDecoder().decode(await vscode.workspace.fs.readFile(target));
 			const updated = applyUnifiedPatch(original, patch);
 			await vscode.workspace.fs.writeFile(target, new TextEncoder().encode(updated));
-			return `Patch applied:\n\n${patch}\n\nUpdated file:\n\n${updated}`;
+			return `Patch applied to ${path} (${Buffer.byteLength(updated)} bytes).`;
 		} catch (error) {
 			const message = error instanceof PatchError ? `Error: ${error.message}` : formatError(error);
 			return formatPatchError(message, patch);

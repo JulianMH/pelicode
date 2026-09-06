@@ -1,3 +1,1 @@
-export const MAX_DISPLAY_BYTES = 100_000;
-
 export const MAX_OPENROUTER_RESPONSE_BYTES = 8_000;

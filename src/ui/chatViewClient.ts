@@ -36,6 +36,14 @@ export abstract class ChatViewClient {
 		this.post({ type: 'send', id: this.chatId, text, model });
 	}
 
+	context(model: OpenRouterModel): void {
+		this.post({ type: 'context', id: this.chatId, model });
+	}
+
+	compact(model: OpenRouterModel): void {
+		this.post({ type: 'compact', id: this.chatId, model });
+	}
+
 	cancel(): void {
 		this.post({ type: 'cancel', id: this.chatId });
 	}

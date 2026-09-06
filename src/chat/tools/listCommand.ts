@@ -35,6 +35,7 @@ export const listCommand: Command = {
 		if (typeof target === 'string') return target;
 		try {
 			const entries = await vscode.workspace.fs.readDirectory(target);
+			entries.sort(([a], [b]) => a.localeCompare(b));
 			return entries
 				.map(([name, type]) => `${type === vscode.FileType.Directory ? 'dir' : 'file'} ${name}`)
 				.join('\n');

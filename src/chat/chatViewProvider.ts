@@ -1,3 +1,10 @@
+import {
+	compactionThreshold,
+	estimateInput,
+	getModelLimits,
+	inputBudget,
+	type ContextUsage,
+} from './context';
 import * as vscode from 'vscode';
 import { randomBytes } from 'node:crypto';
 import type { ChatEntry, ChatToolCall, OpenRouterMessage } from './chatEntry';
@@ -117,11 +124,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				return;
 			case 'cancel':
 				chatModel.activeRequest?.abort();
-				chatModel.activeRequest = undefined;
 				this.updateChats();
-				this.broadcast((host) => host.requestFinished(chatModel.id));
 				return;
 			case 'ready':
+				void this.updateContext(chatModel, chatModel.activeModel ?? defaultModel, host);
 				host.restore(chatModel.id, chatModel.messages, chatModel.activeModel);
 				host.costUpdated(chatModel.id, chatModel.totalCost);
 				if (chatModel.activeRequest) host.requestStarted(chatModel.id);
@@ -137,6 +143,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			case 'viewClosed':
 				if (this.openChats.get(host) === chatModel.id) this.openChats.delete(host);
 				return;
+			case 'context':
+				if (isOpenRouterModel(message.model))
+					void this.updateContext(chatModel, message.model, host);
+				return;
+			case 'compact': {
+				if (chatModel.activeRequest || !isOpenRouterModel(message.model)) return;
+				const controller = new AbortController();
+				chatModel.activeRequest = controller;
+				this.broadcast((peer) => peer.requestStarted(chatModel.id));
+				this.updateChats();
+				void this.compactContext(chatModel, message.model, controller.signal)
+					.catch((error: unknown) => {
+						if (!controller.signal.aborted)
+							this.appendEntry(chatModel, {
+								type: 'assistantMessage',
+								text: error instanceof Error ? error.message : 'Compaction failed.',
+							});
+					})
+					.finally(() => {
+						if (chatModel.activeRequest === controller) {
+							chatModel.activeRequest = undefined;
+							this.broadcast((peer) => peer.requestFinished(chatModel.id));
+							void this.updateContext(chatModel, message.model);
+							this.updateChats();
+						}
+					});
+				return;
+			}
 			case 'send': {
 				const text = message.text.trim();
 				if (!text || chatModel.activeRequest) return;
@@ -148,6 +182,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				void this.reply(chatModel, text, model, controller.signal).finally(() => {
 					if (chatModel.activeRequest === controller) {
 						chatModel.activeRequest = undefined;
+						void this.updateContext(chatModel, model);
 						this.broadcast((host) => host.requestFinished(chatModel.id));
 						this.updateChats();
 					}
@@ -190,6 +225,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 							if (data.id !== id || !Array.isArray(data.messages)) return;
 							const model = new ChatModel(id);
 							model.messages = data.messages;
+							if (
+								data.contextSummary &&
+								typeof data.contextSummary.text === 'string' &&
+								Number.isSafeInteger(data.contextSummary.through) &&
+								data.contextSummary.through >= 0 &&
+								data.contextSummary.through <= model.messages.length
+							)
+								model.contextSummary = data.contextSummary;
 							model.isUnread = data.isUnread === true;
 							model.totalCost = typeof data.totalCost === 'number' ? data.totalCost : 0;
 							model.activeModel = isOpenRouterModel(data.activeModel)
@@ -211,6 +254,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const snapshot = JSON.stringify({
 			id: chatModel.id,
 			messages: chatModel.messages,
+			contextSummary: chatModel.contextSummary,
 			isUnread: chatModel.isUnread,
 			activeModel: chatModel.activeModel,
 			totalCost: chatModel.totalCost,
@@ -274,8 +318,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		try {
 			this.broadcast((host) => host.requestStarted(chatModel.id));
 			while (!signal.aborted) {
+				const limits = await getModelLimits(model);
+				if (estimateInput(this.apiMessages(chatModel, model)) >= compactionThreshold(limits))
+					await this.compactContext(chatModel, model, signal);
+				signal.throwIfAborted();
+				await this.updateContext(chatModel, model);
 				const response = await requestOpenRouter(
-					toApiMessages(chatModel.messages, model),
+					this.apiMessages(chatModel, model),
 					model,
 					0,
 					0,
@@ -307,10 +356,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 					if (content) this.broadcast((host) => host.entry(chatModel.id, entry));
 				}
 				if (!response.toolCalls?.length) break;
+				let compactRequested = false;
 				for (const toolCall of response.toolCalls) {
-					await this.runTool(chatModel, toolCall, signal);
+					compactRequested = (await this.runTool(chatModel, toolCall, signal)) || compactRequested;
 					if (signal.aborted) return;
 				}
+				if (compactRequested) await this.compactContext(chatModel, model, signal);
 			}
 		} catch (error) {
 			if (signal.aborted) return;
@@ -334,10 +385,146 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		chatModel: ChatModel,
 		toolCall: ChatToolCall,
 		signal: AbortSignal,
+	): Promise<boolean> {
+		if (signal.aborted) return false;
+		let compact = false;
+		const entry = await executeToolCall(toolCall, chatModel.toolPages, () => {
+			compact = true;
+		});
+		if (this.chatModels.get(chatModel.id) === chatModel) this.appendEntry(chatModel, entry);
+		return compact;
+	}
+
+	private apiMessages(
+		chatModel: ChatModel,
+		model: OpenRouterModel,
+		end = chatModel.messages.length,
+		summary = chatModel.contextSummary,
+	): OpenRouterMessage[] {
+		const through = summary?.through ?? 0;
+		const previousModel = chatModel.messages
+			.slice(0, through)
+			.reverse()
+			.find((entry) => entry.type === 'modelSwitch');
+		const entries = chatModel.messages.slice(through, end);
+		if (previousModel) entries.unshift(previousModel);
+		const messages = toApiMessages(entries, model);
+		if (summary)
+			messages.unshift({
+				role: 'user',
+				content: `Previous conversation summary (continue outstanding work):\n${summary.text}`,
+			});
+		return messages.flatMap((message, index): OpenRouterMessage[] => {
+			if (message.role !== 'assistant' || !message.tool_calls?.length) return [message];
+			const following: OpenRouterMessage[] = [];
+			for (let next = index + 1; next < messages.length && messages[next].role === 'tool'; next++)
+				following.push(messages[next]);
+			const missing = message.tool_calls.filter(
+				(call) => !following.some((item) => item.role === 'tool' && item.tool_call_id === call.id),
+			);
+			return [
+				message,
+				...missing.map((call): OpenRouterMessage => ({
+					role: 'tool',
+					tool_call_id: call.id,
+					content:
+						'Tool execution was interrupted; no result is available. Inspect workspace state before retrying mutations.',
+				})),
+			];
+		});
+	}
+
+	private async updateContext(
+		chatModel: ChatModel,
+		model: OpenRouterModel,
+		host?: ChatViewHost,
 	): Promise<void> {
-		if (signal.aborted) return;
-		const entry = await executeToolCall(toolCall);
-		if (!signal.aborted) this.appendEntry(chatModel, entry);
+		const usage: ContextUsage = { model, estimatedTokens: 0 };
+		try {
+			const limits = await getModelLimits(model);
+			usage.limit = limits.context;
+			usage.reservedOutput = limits.output;
+			usage.compactAt = compactionThreshold(limits);
+		} catch (error) {
+			usage.error = error instanceof Error ? error.message : 'Model context limit unavailable.';
+		}
+		usage.estimatedTokens = estimateInput(this.apiMessages(chatModel, model));
+		if (host) host.contextUpdated(chatModel.id, usage);
+		else this.broadcast((peer) => peer.contextUpdated(chatModel.id, usage));
+	}
+
+	private async compactContext(
+		chatModel: ChatModel,
+		model: OpenRouterModel,
+		signal: AbortSignal,
+	): Promise<void> {
+		const limits = await getModelLimits(model);
+		signal.throwIfAborted();
+		const start = chatModel.contextSummary?.through ?? 0;
+		if (
+			!chatModel.contextSummary &&
+			!chatModel.messages.slice(start).some((entry) => entry.rawOpenRouterPayload)
+		)
+			return;
+		let through = chatModel.messages.length - 1;
+		while (
+			through >= 0 &&
+			(chatModel.messages[through].type !== 'userMessage' ||
+				!chatModel.messages[through].rawOpenRouterPayload)
+		)
+			through--;
+		const tail = toApiMessages(chatModel.messages.slice(Math.max(start, through)), model);
+		if (through <= start || estimateInput(tail) > compactionThreshold(limits) / 2)
+			through = chatModel.messages.length;
+		const transcript = this.apiMessages(chatModel, model, through)
+			.map((message) => {
+				if (message.role === 'assistant') {
+					const { reasoning_details: _reasoning, ...rest } = message;
+					return rest;
+				}
+				return message;
+			})
+			.map((message) => JSON.stringify(message))
+			.join('\n');
+		let summary = '';
+		let offset = 0;
+		while (offset < transcript.length) {
+			signal.throwIfAborted();
+			let length = Math.min(transcript.length - offset, inputBudget(limits) * 2);
+			let messages: OpenRouterMessage[];
+			while (true) {
+				messages = [
+					{
+						role: 'user',
+						content: `Previous handoff:\n${summary}\n\nNext transcript section:\n${transcript.slice(offset, offset + length)}`,
+					},
+				];
+				if (estimateInput(messages, true) <= inputBudget(limits)) break;
+				length = Math.floor(length / 2);
+				if (!length) throw new Error('This model has insufficient context for compaction.');
+			}
+			const response = await requestOpenRouter(messages, model, 0, 0, signal, 0, true);
+			if (this.chatModels.get(chatModel.id) !== chatModel) return;
+			chatModel.totalCost += response.cost;
+			this.persist(chatModel);
+			this.broadcast((host) => host.costUpdated(chatModel.id, chatModel.totalCost));
+			signal.throwIfAborted();
+			if (response.truncated)
+				throw new Error('Context summary was truncated; the existing context was kept.');
+			if (!response.content?.trim())
+				throw new Error('Compaction returned no summary; the existing context was kept.');
+			summary = response.content.trim();
+			offset += length;
+		}
+		const checkpoint = { text: summary, through };
+		if (
+			estimateInput(this.apiMessages(chatModel, model, chatModel.messages.length, checkpoint)) >=
+			estimateInput(this.apiMessages(chatModel, model))
+		)
+			throw new Error('Compaction did not reduce the context; the existing context was kept.');
+		chatModel.contextSummary = checkpoint;
+		this.appendEntry(chatModel, { type: 'compaction', text: summary });
+		await this.updateContext(chatModel, model);
 	}
 
 	private getHtml(webview: vscode.Webview): string {

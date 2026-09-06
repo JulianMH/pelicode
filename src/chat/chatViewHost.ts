@@ -1,3 +1,4 @@
+import type { ContextUsage } from './context';
 import type { ChatEntry } from './chatEntry';
 import type { OpenRouterModel } from './models';
 import type {
@@ -23,6 +24,10 @@ export abstract class ChatViewHost {
 
 	restore(id: string, messages: ChatEntry[], model?: OpenRouterModel): void {
 		this.post({ type: 'restore', id, messages, model });
+	}
+
+	contextUpdated(id: string, usage: ContextUsage): void {
+		this.post({ type: 'contextUpdated', id, usage });
 	}
 
 	costUpdated(id: string, cost: number): void {

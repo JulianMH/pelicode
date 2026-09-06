@@ -21,10 +21,44 @@ been used to develop PeliCode itself.
 - Workspace tools for listing, reading, writing, patching, moving, and removing
   files.
 - Visible tool results and optional model reasoning in the chat.
+- Model-specific context usage, automatic compaction, and a manual compaction tool.
+- Shared 8 KB tool-result pagination and partial local file reads.
 
 Tool calls can modify files without a confirmation step. Only use PeliCode in a
 workspace you trust, and review its changes as you would changes from any other
 coding agent.
+
+## Context and tool limits
+
+Every tool result is limited to **8,000 UTF-8 bytes**, including its pagination
+hint. Tools have no configurable page size or entry count. When more output is
+available, the agent can call `nextPage({"cursor":"…"})`. Pagination belongs to
+the chat and never repeats the original operation. Up to 32 unfinished results
+are retained; cursors expire when evicted or the extension reloads.
+
+`read({"path":"…"})` reads local files incrementally rather than loading the
+whole file. If a file changes between pages, the agent must read it again.
+Non-local filesystem providers lack partial reads, so files larger than 8 KB
+are rejected there. Directory listings and Git output use the same pagination.
+Successful writes and patches return a short confirmation instead of echoing
+file contents. Prefer patches for changes to existing files.
+
+The context indicator estimates tokens for the active conversation, system prompt,
+and tool definitions. The estimate uses UTF-8 size, not a model-specific tokenizer.
+Context limits come from the [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/get-models)
+and are cached for one hour. If a model's limit is unavailable, requests stop with
+an explicit error instead of assuming a fixed context window.
+
+Automatic compaction starts at **80% of the model's available input budget**:
+its context window minus the response allowance (up to 8,192 tokens, reduced for
+smaller models) and a 5% estimation buffer. There is no fixed conversation-token
+threshold. You can also use **Compact context** or the agent's `compactContext({})`
+tool. Compaction preserves a summary of goals, constraints, decisions and pending
+work, plus the latest user turn when it fits. Oversized histories are summarized
+in sections that fit the selected model. Compaction costs are included in the
+chat total. Summaries can lose detail; the full original history remains saved
+and visible, with older messages loaded into the view on demand. Failed or
+cancelled compaction leaves the previous context intact.
 
 ## Screenshot
 
@@ -35,7 +69,7 @@ coding agent.
 ## Features still under development
 
 - [x] Keep PeliCode file access strictly inside trusted workspace folders.
-- [ ] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
+- [x] Keep long chats and large file edits fast and cost-efficient, take context limit into account.
 - [x] Extend PeliCode to accept remote control from other devices via WebSockets.
 - [x] Support selecting files across multi-root workspaces.
 - [ ] Give each chat its own Git branch workspace.

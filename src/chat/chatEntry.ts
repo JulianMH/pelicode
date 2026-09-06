@@ -21,7 +21,7 @@ export type OpenRouterMessage =
 	| { role: 'tool'; content: string; tool_call_id: string };
 
 export type ChatEntry = {
-	type: 'assistantMessage' | 'reasoning' | 'modelSwitch' | 'tool' | 'userMessage';
+	type: 'compaction' | 'assistantMessage' | 'reasoning' | 'modelSwitch' | 'tool' | 'userMessage';
 	text: string;
 	rawOpenRouterPayload?: OpenRouterMessage;
 };

@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { MAX_DISPLAY_BYTES } from '../constants';
 import type { Command } from './command';
 import { formatError, getRequiredWorkspaceTarget } from './workspace';
 
@@ -32,11 +31,7 @@ export const writeCommand: Command = {
 		try {
 			const bytes = new TextEncoder().encode(content);
 			await vscode.workspace.fs.writeFile(target, bytes);
-			if (bytes.length > MAX_DISPLAY_BYTES) {
-				const displayContent = new TextDecoder().decode(bytes.slice(0, MAX_DISPLAY_BYTES));
-				return `${displayContent}\n[Written content truncated at ${MAX_DISPLAY_BYTES} bytes for display.]`;
-			}
-			return content;
+			return `Wrote ${bytes.length} bytes to ${path}.`;
 		} catch (error) {
 			return formatError(error);
 		}

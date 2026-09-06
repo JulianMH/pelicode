@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { MAX_DISPLAY_BYTES } from '../constants';
 import type { Command } from './command';
 import { formatError, getWorkspaceRoot } from './workspace';
 
@@ -56,10 +55,10 @@ export const gitCommand: Command = {
 		try {
 			const { stdout, stderr } = await execFileAsync('git', parsed.args, {
 				cwd: root.uri.fsPath,
-				maxBuffer: MAX_DISPLAY_BYTES * 10,
+				maxBuffer: 1_000_000,
 				windowsHide: true,
 			});
-			return truncateOutput(stdout || stderr);
+			return stdout || stderr;
 		} catch (error) {
 			return formatError(error);
 		}
@@ -88,10 +87,4 @@ function parseGitCommand(
 		return { args, workspace };
 	}
 	return 'Error: unsupported Git command. Use exactly one documented read-only command; extra flags and shell operators such as &&, ;, and | are not allowed.';
-}
-
-function truncateOutput(output: string): string {
-	return output.length > MAX_DISPLAY_BYTES
-		? `${output.slice(0, MAX_DISPLAY_BYTES)}\n[Output truncated at ${MAX_DISPLAY_BYTES} bytes.]`
-		: output;
 }

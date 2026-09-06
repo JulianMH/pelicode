@@ -1,3 +1,5 @@
+import type { ToolResult } from './pagination';
+
 export type ApiTool = {
 	type: 'function';
 	function: {
@@ -14,7 +16,7 @@ export type ApiTool = {
 
 export interface Command {
 	readonly apiTool: ApiTool;
-	execute(args: ToolArguments): Promise<string>;
+	execute(args: ToolArguments): Promise<ToolResult>;
 }
 
 export type ToolArguments = {

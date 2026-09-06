@@ -3,6 +3,7 @@
 	import MarkdownIt from 'markdown-it';
 	import { onMount, tick } from 'svelte';
 	import { defaultModel, isOpenRouterModel, modelGroups, modelInfo, providerOf, type OpenRouterModel } from '../chat/models';
+	import type { ContextUsage } from '../chat/context';
 	import type { ChatEntry } from '../chat/chatEntry';
 	import type { HostToWebviewMessage } from '../chat/protocol';
 	import { SYSTEM_PROMPT } from '../chat/prompt';
@@ -22,6 +23,8 @@
 	let model: OpenRouterModel = defaultModel;
 	let isWaiting = false;
 	let totalCost = 0;
+	let context: ContextUsage | undefined;
+	let visibleCount = 100;
 	let messages: ChatEntry[] = [];
 	let modelMenuOpen = false;
 	let copyOnWrite = false;
@@ -55,11 +58,17 @@
 		void scrollToBottom();
 	}
 	function cancel(): void {
-		isWaiting = false;
 		client.cancel();
+	}
+	function compact(): void {
+		if (!connected || isWaiting) return;
+		isWaiting = true;
+		client.compact(model);
 	}
 	function selectModel(value: OpenRouterModel): void {
 		model = value;
+		context = undefined;
+		client.context(value);
 		modelMenuOpen = false;
 	}
 	function renderMarkdown(text: string): string {
@@ -86,6 +95,9 @@
 				);
 				model = data.model ?? defaultModel;
 				break;
+			case 'contextUpdated':
+				if (data.usage.model === model) context = data.usage;
+				return;
 			case 'costUpdated':
 				totalCost = data.cost;
 				break;
@@ -122,12 +134,20 @@
 				<pre>{SYSTEM_PROMPT}</pre>
 			</details>
 		{/if}
-		{#each messages as message}
+		{#if messages.length > visibleCount}
+			<button type="button" class="cancel-btn" onclick={() => visibleCount += 100}>Show older messages</button>
+		{/if}
+		{#each messages.slice(-visibleCount) as message}
 			{#if message.type === 'modelSwitch'}
 				<div class="model-switch">
 					<span class="dot" data-provider={modelInfo(message.text)?.provider}></span>
 					<span>{modelLabel(message.text)}</span>
 				</div>
+			{:else if message.type === 'compaction'}
+				<details class="reasoning">
+					<summary>Context compacted · View summary</summary>
+					<pre>{message.text}</pre>
+				</details>
 			{:else if message.type === 'reasoning'}
 				<details class="reasoning">
 					<summary>Reasoning</summary>
@@ -148,6 +168,17 @@
 		{#if totalCost !== 0}
 			<div class="protocol-cost" title="OpenRouter costs for this extension session">Money spent: {formatCost(totalCost)}</div>
 		{/if}
+		<div class="context-bar">
+			{#if context?.limit}
+				<span title={`Estimated tokens: ${context.estimatedTokens.toLocaleString()} / ${context.limit.toLocaleString()}, including system prompt and tools. Automatic compaction at ${context.compactAt?.toLocaleString()} tokens; ${context.reservedOutput?.toLocaleString()} reserved for the response.`}>
+					Context {Math.round(context.estimatedTokens / context.limit * 100)}%
+				</span>
+				<meter min="0" max={context.limit} value={context.estimatedTokens} high={context.compactAt} aria-label="Estimated context usage"></meter>
+			{:else}
+				<span title={context?.error}>Context {context?.error ? 'unavailable' : '…'}</span>
+			{/if}
+			<button type="button" class="cancel-btn" disabled={!connected || isWaiting || !messages.length || !context?.limit} onclick={compact} title="Compact context">Compact</button>
+		</div>
 		{#if isWaiting}
 			<div class="typing" aria-label="Assistant is typing">
 				<PelicanIcon />
@@ -208,6 +239,9 @@
 </div>
 
 <style>
+	.context-bar { display: flex; align-self: center; align-items: center; gap: 8px; max-width: 100%; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 0.8em; }
+	.context-bar meter { width: 60px; min-width: 24px; flex-shrink: 1; }
+	.context-bar button:disabled { opacity: 0.5; cursor: default; }
 	div.main { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 	.protocol-cost {
 		align-self: center; color: var(--vscode-descriptionForeground);

@@ -1,18 +1,16 @@
 import type { ChatEntry, ChatToolCall, OpenRouterMessage, OpenRouterToolCall } from './chatEntry';
 import { MAX_OPENROUTER_RESPONSE_BYTES } from './constants';
-import { ApiTool, commands } from './tools';
+import { apiTools } from './tools';
+import { COMPACTION_PROMPT, estimateInput, getModelLimits, inputBudget } from './context';
 import { isOpenRouterModel, type OpenRouterModel } from './models';
 import { CONTINUE_PROMPT, FINAL_RESPONSE_PROMPT, SYSTEM_PROMPT } from './prompt';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MAX_OUTPUT_TOKENS = 8192;
 const MAX_REASONING_TOKENS = 4096;
 const MAX_CONTINUATIONS = 2;
 const MAX_RATE_LIMIT_RETRIES = 2;
 const RATE_LIMIT_RETRY_FALLBACK_MS = 1_000;
 const RATE_LIMIT_RETRY_BUFFER_MS = 250;
-
-const apiTools: ApiTool[] = commands.map((command) => command.apiTool);
 
 type OpenRouterResponse = {
 	model?: string;
@@ -38,6 +36,7 @@ export type OpenRouterResult = {
 	content?: string;
 	toolCalls?: ChatToolCall[];
 	cost: number;
+	truncated?: boolean;
 	reasoningDetails?: unknown[];
 };
 
@@ -90,10 +89,17 @@ export async function requestOpenRouter(
 	emptyResponseRetryCount = 0,
 	signal?: AbortSignal,
 	rateLimitRetryCount = 0,
+	compact = false,
 ): Promise<OpenRouterResult> {
 	const apiKey = process.env.OPENROUTER_API_KEY;
 	if (!apiKey)
 		throw new Error('OPENROUTER_API_KEY is not available to the VS Code extension host.');
+	const limits = await getModelLimits(model);
+	signal?.throwIfAborted();
+	if (estimateInput(messages, compact) > inputBudget(limits))
+		throw new Error(
+			'Context is too large for this model. Compact the context or shorten the message.',
+		);
 	const response = await fetch(OPENROUTER_URL, {
 		method: 'POST',
 		signal,
@@ -104,11 +110,20 @@ export async function requestOpenRouter(
 		},
 		body: JSON.stringify({
 			model,
-			max_tokens: MAX_OUTPUT_TOKENS,
-			reasoning: { max_tokens: MAX_REASONING_TOKENS },
-			tools: apiTools,
-			tool_choice: 'auto',
-			messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+			max_tokens: compact ? Math.min(2048, limits.output) : limits.output,
+			...(compact
+				? {}
+				: {
+						reasoning: {
+							max_tokens: Math.min(MAX_REASONING_TOKENS, Math.floor(limits.output / 2)),
+						},
+						tools: apiTools,
+						tool_choice: 'auto',
+					}),
+			messages: [
+				{ role: 'system', content: compact ? COMPACTION_PROMPT : SYSTEM_PROMPT },
+				...messages,
+			],
 		}),
 	});
 	const body = await parseOpenRouterResponse(response);
@@ -122,6 +137,7 @@ export async function requestOpenRouter(
 				emptyResponseRetryCount,
 				signal,
 				rateLimitRetryCount + 1,
+				compact,
 			);
 		}
 		throw new Error(formatOpenRouterError(response, body));
@@ -135,6 +151,7 @@ export async function requestOpenRouter(
 		arguments: call.function.arguments,
 	}));
 	const cost = body.usage?.cost ?? 0;
+	if (compact) return { content, cost, truncated: choice?.finish_reason === 'length' };
 	if (!content && !toolCalls?.length) {
 		if (emptyResponseRetryCount < 1)
 			return requestOpenRouter(
@@ -143,14 +160,22 @@ export async function requestOpenRouter(
 				continuationCount,
 				emptyResponseRetryCount + 1,
 				signal,
+				0,
+				compact,
 			).then((retry) => ({ ...retry, cost: cost + retry.cost }));
 		throw new Error(formatEmptyOpenRouterResponse(body, model));
 	}
 	if (
+		!compact &&
 		content &&
 		choice?.finish_reason === 'length' &&
 		continuationCount < MAX_CONTINUATIONS &&
-		!toolCalls?.length
+		!toolCalls?.length &&
+		estimateInput([
+			...messages,
+			{ role: 'assistant', content },
+			{ role: 'user', content: CONTINUE_PROMPT },
+		]) <= inputBudget(limits)
 	) {
 		const continuation = await requestOpenRouter(
 			[...messages, { role: 'assistant', content }, { role: 'user', content: CONTINUE_PROMPT }],
